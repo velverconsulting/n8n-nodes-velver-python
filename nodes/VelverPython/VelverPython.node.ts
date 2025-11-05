@@ -30,15 +30,15 @@ export async function runPython(script: string, inputs: string): Promise<PythonE
 		let pythonOutput = '';
 		let errorOutput = '';
 
-		pythonProcess.stderr.on('data', (data: String) => {
+		pythonProcess.stderr.on('data', (data: string) => {
 			errorOutput += data.toString();
 		});
 
-		pythonProcess.stdout.on('data', (data: String) => {
+		pythonProcess.stdout.on('data', (data: string) => {
 			pythonOutput += data.toString();
 		});
 
-		pythonProcess.on('close', (code: Number) => {
+		pythonProcess.on('close', (code: number) => {
 			if (code !== 0) {
 				resolve({
 					success: false,
