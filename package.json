@@ -16,7 +16,7 @@
 		"url": "https://github.com/velverconsulting/n8n-nodes-velver-python.git"
 	},
 	"scripts": {
-		"build": "n8n-node build",
+		"build": "n8n-node build & ssh root@100.82.138.91 \"rm -rf ~/n8n-docker/custom_nodes/n8n-nodes-velver/*\" & scp -r ./dist/* root@100.82.138.91:~/n8n-docker/custom_nodes/n8n-nodes-velver/",
 		"build:watch": "tsc --watch",
 		"dev": "n8n-node dev",
 		"lint": "n8n-node lint",
@@ -32,7 +32,7 @@
 		"strict": true,
 		"credentials": [],
 		"nodes": [
-			"dist/nodes/VelverPython/VelverPython.node.js"
+			"nodes/VelverPython/VelverPython.node.js"
 		]
 	},
 	"devDependencies": {
