@@ -1,4 +1,4 @@
-/* eslint-disable @n8n/community-nodes/no-restricted-imports */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { IExecuteFunctions, NodeOperationError } from 'n8n-workflow';
 import CustomAxios from './axios';
 import { getFileType } from './filetype';
@@ -118,7 +118,6 @@ export async function handleIneValidation(
 		const cleanItems = await cleanIne(items, frontType, apiKey, author);
 		return cleanItems;
 	} else {
-		ineStage === 'revalidate';
 		const prevData = context.getNodeParameter('prevData', itemIndex, '') as string;
 		const prevCURP = context.getNodeParameter('prevCURP', itemIndex, '') as string;
 		const newQR = context.getNodeParameter('newQR', itemIndex, '') as string;

@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable @n8n/community-nodes/no-restricted-imports */
 import {
 	INodeType,
 	INodeTypeDescription,
@@ -18,7 +20,7 @@ const PY_FILES_DIR = '/home/node/.n8n/tmp-py-files';
 // --- Execution result interface ---
 interface PythonExecutionResult {
 	success: boolean;
-	data: any;
+	data: object | null;
 	error: string | null;
 	logs: string | string[];
 }
@@ -108,66 +110,44 @@ export async function runPython(script: string, inputs: string): Promise<PythonE
 	});
 }
 
-/**
- * Clean expired prd files.
- * Async function (fire-and-forget).
- */
-async function cleanupExpiredFiles(dir: string, logger: Logger): Promise<void> {
-	logger.info('Running cleanup for expired PRD script files...');
-	try {
-		const files = await fs.readdir(dir);
-		const now = Date.now();
-
-		for (const file of files) {
-			try {
-				const parts = file.split('-');
-				if (parts.length === 4 && parts[0] === 'script' && parts[2] === 'prd') {
-					const expirationTimestamp = parseInt(parts[3].split('.')[0], 10);
-					if (!isNaN(expirationTimestamp) && now > expirationTimestamp) {
-						const filePath = path.join(dir, file);
-						await fs.unlink(filePath);
-						logger.info(`Cleaned up expired file: ${file}`);
-					}
-				}
-			} catch (fileError) {
-				logger.warn(`Error processing file ${file} for cleanup: ${fileError.message}`);
-			}
-		}
-	} catch (error) {
-		logger.warn(`Failed to run expired file cleanup: ${error.message}`);
-	}
+interface IToolNodeDescription extends INodeTypeDescription {
+	usableAsTool: boolean;
 }
 
-/**
- * Clean distinct mode file dev <--> prd
- * (Invalidate caché if mode changed)
- */
-async function cleanupOldModeFiles(
-	dir: string,
-	fileID: string,
-	currentMode: 'dev' | 'prd',
-	logger: Logger,
-): Promise<void> {
-	const oppositeMode = currentMode === 'dev' ? 'prd' : 'dev';
-	const prefixToClear = `script-${fileID}-${oppositeMode}-`;
-
+async function cleanupOldFiles(logger: Logger): Promise<void> {
+	logger.info(`Starting cleanup of old files in ${PY_FILES_DIR}...`);
 	try {
-		const files = await fs.readdir(dir);
+		const files = await fs.readdir(PY_FILES_DIR);
+		const now = Date.now();
+		const twentyFourHours = 24 * 60 * 60 * 1000;
+
 		for (const file of files) {
-			if (file.startsWith(prefixToClear)) {
-				const filePath = path.join(dir, file);
-				await fs.unlink(filePath);
-				logger.info(`Cache invalidated, removed old mode file: ${file}`);
+			if (!file.startsWith('script-') || !file.endsWith('.py')) {
+				continue;
+			}
+
+			const filePath = path.join(PY_FILES_DIR, file);
+
+			try {
+				const stats = await fs.stat(filePath);
+				const fileAge = now - stats.mtime.getTime();
+
+				if (fileAge > twentyFourHours) {
+					await fs.unlink(filePath);
+					logger.info(`Cleaned up old script file: ${filePath}`);
+				}
+			} catch (statError: any) {
+				logger.warn(`Could not stat/unlink old file ${filePath}: ${statError.message}`);
 			}
 		}
-	} catch (error) {
-		logger.warn(`Failed to clean up old mode files: ${error.message}`);
+	} catch (readDirError: any) {
+		logger.warn(`Failed to run background cleanup in ${PY_FILES_DIR}: ${readDirError.message}`);
 	}
 }
 
 // --- Node Classes ---
 export class VelverPython implements INodeType {
-	description: INodeTypeDescription = {
+	description: IToolNodeDescription = {
 		displayName: 'Velver Consulting - Python Executor',
 		name: 'velverPython',
 		icon: 'file:VelverPython.icon.svg',
@@ -180,17 +160,6 @@ export class VelverPython implements INodeType {
 		inputs: ['main'],
 		outputs: ['main'],
 		properties: [
-			{
-				displayName: 'Py File ID',
-				name: 'fileID',
-				type: 'string',
-				default: uuidv4().replace(/-/g, ''),
-				typeOptions: {
-					rows: 1,
-				},
-				placeholder: 'Unique file ID',
-				description: 'The Python script to execute',
-			},
 			{
 				displayName: 'Python Code',
 				name: 'pythonCode',
@@ -213,26 +182,8 @@ export class VelverPython implements INodeType {
 				placeholder: 'Input for the Python script...',
 				description: 'Text to be passed to the Python script as stdin',
 			},
-			{
-				displayName: 'Node Mode',
-				name: 'nodeMode',
-				type: 'options',
-				default: 'prd',
-				options: [
-					{
-						name: 'Development',
-						value: 'dev',
-						description: 'Re-create the .py file on every run and delete it after',
-					},
-					{
-						name: 'Production',
-						value: 'prd',
-						description: 'Cache the .py file for 24 hours',
-					},
-				],
-				placeholder: 'Choose the node mode...',
-			},
 		],
+		usableAsTool: true,
 	};
 
 	// --- Main Logic ---
@@ -249,11 +200,8 @@ export class VelverPython implements INodeType {
 		}
 
 		for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
-			const fileID = this.getNodeParameter('fileID', itemIndex, '') as string;
 			const pythonCode = this.getNodeParameter('pythonCode', itemIndex, '') as string;
 			const rawStdinInput = this.getNodeParameter('stdinInput', itemIndex, '{}') as string;
-			const nodeMode = this.getNodeParameter('nodeMode', itemIndex, 'prd') as 'dev' | 'prd';
-
 			let stdinInput: object;
 			let tempFilePath: string | undefined;
 
@@ -267,11 +215,7 @@ export class VelverPython implements INodeType {
 			}
 
 			try {
-				await cleanupOldModeFiles(PY_FILES_DIR, fileID, nodeMode, logger);
-				const expirationTimestamp =
-					nodeMode === 'prd' ? Date.now() + 24 * 60 * 60 * 1000 : Date.now();
-
-				const tempFileName = `script-${fileID}-${nodeMode}-${expirationTimestamp}.py`;
+				const tempFileName = `script-${uuidv4().replace(/-/g, '')}.py`;
 				tempFilePath = path.join(PY_FILES_DIR, tempFileName);
 
 				await fs.writeFile(tempFilePath, pythonCode);
@@ -291,10 +235,10 @@ export class VelverPython implements INodeType {
 					},
 				);
 			} finally {
-				if (tempFilePath && nodeMode === 'dev') {
+				if (tempFilePath) {
 					try {
 						await fs.unlink(tempFilePath);
-						logger.info(`Dev script file cleaned up: ${tempFilePath}`);
+						cleanupOldFiles(logger);
 					} catch (cleanError) {
 						logger.warn(
 							`Failed to clean up temporary dev file ${tempFilePath}: ${cleanError.message}`,
@@ -303,8 +247,6 @@ export class VelverPython implements INodeType {
 				}
 			}
 		}
-		cleanupExpiredFiles(PY_FILES_DIR, logger);
-
 		return [returnData];
 	}
 }

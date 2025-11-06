@@ -1,3 +1,4 @@
+/* eslint-disable no-case-declarations */
 import {
 	INodeType,
 	INodeTypeDescription,
@@ -13,11 +14,15 @@ import {
 import { properties } from './utils/properties';
 import axiosHandler from './utils/axios';
 
+interface IToolNodeDescription extends INodeTypeDescription {
+	usableAsTool: boolean;
+}
+
 // --- Node Classes ---
 export class VelverGobierno implements INodeType {
-	description: INodeTypeDescription = {
+	description: IToolNodeDescription = {
 		displayName: 'Velver Consulting - Validaciones MX',
-		name: 'velverValidaciones',
+		name: 'velverGobierno',
 		icon: 'file:VelverGobierno.icon.svg',
 		group: ['transform'],
 		version: 1,
@@ -34,6 +39,7 @@ export class VelverGobierno implements INodeType {
 			},
 		],
 		properties,
+		usableAsTool: true,
 	};
 
 	// --- Main Logic ---
@@ -70,7 +76,8 @@ export class VelverGobierno implements INodeType {
 					},
 				});
 
-				let responseData: any;
+				let responseData: { error?: string };
+
 				switch (validationType) {
 					case 'curp':
 					case 'rfc':
