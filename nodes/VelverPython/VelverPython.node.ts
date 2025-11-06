@@ -13,13 +13,14 @@ import { spawn } from 'child_process';
 import { v4 as uuidv4 } from 'uuid';
 
 // --- Root dir ---
-const PY_FILES_DIR = '/tmp-py-files';
+const PY_FILES_DIR = '/home/node/.n8n/tmp-py-files';
 
 // --- Execution result interface ---
 interface PythonExecutionResult {
 	success: boolean;
 	data: any;
 	error: string | null;
+	logs: string | string[];
 }
 
 // --- Run Python code ---
@@ -44,17 +45,48 @@ export async function runPython(script: string, inputs: string): Promise<PythonE
 					success: false,
 					data: null,
 					error: errorOutput || `Python process exited with code ${code}`,
+					logs: pythonOutput,
 				});
 				return;
 			}
 			try {
-				const jsonData = JSON.parse(pythonOutput);
-				resolve({ success: true, data: jsonData, error: null });
+				const jsonData = JSON.parse(
+					pythonOutput
+						.trim()
+						.split('\n')
+						.filter((line) => line.length > 0)
+						.slice(-1)[0],
+				);
+				if (jsonData.error) {
+					resolve({
+						success: false,
+						data: jsonData,
+						error: jsonData.error,
+						logs: pythonOutput
+							.split('\n')
+							.filter((line) => line.length > 0)
+							?.slice(0, -1),
+					});
+				} else {
+					resolve({
+						success: true,
+						data: jsonData,
+						error: null,
+						logs: pythonOutput
+							.split('\n')
+							.filter((line) => line.length > 0)
+							?.slice(0, -1),
+					});
+				}
 			} catch (parseError: any) {
 				resolve({
 					success: false,
 					data: null,
-					error: `Failed to parse Python output as JSON. Error: ${parseError.message}. Output: ${pythonOutput}`,
+					error: `Failed to parse Python output as JSON. Error: ${parseError.message}.`,
+					logs: pythonOutput
+						.split('\n')
+						.filter((line) => line.length > 0)
+						?.slice(0, -1),
 				});
 			}
 		});
@@ -64,6 +96,10 @@ export async function runPython(script: string, inputs: string): Promise<PythonE
 				success: false,
 				data: null,
 				error: `Failed to start Python process: ${err.message}`,
+				logs: pythonOutput
+					.split('\n')
+					.filter((line) => line.length > 0)
+					?.slice(0, -1),
 			});
 		});
 
@@ -132,7 +168,7 @@ async function cleanupOldModeFiles(
 // --- Node Classes ---
 export class VelverPython implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'Velver - Python Executor',
+		displayName: 'Velver Consulting - Python Executor',
 		name: 'velverPython',
 		icon: 'file:VelverPython.icon.svg',
 		group: ['transform'],
@@ -225,7 +261,7 @@ export class VelverPython implements INodeType {
 				stdinInput = JSON.parse(rawStdinInput);
 			} catch {
 				returnData.push({
-					json: { success: false, data: null, error: 'Invalid JSON provided' },
+					json: { success: false, data: null, error: 'Invalid JSON provided', logs: '' },
 				});
 				continue;
 			}
