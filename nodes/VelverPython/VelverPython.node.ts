@@ -175,7 +175,7 @@ export class VelverPython implements INodeType {
 		version: 1,
 		description: 'Executes a Python script with json input and output parameters.',
 		defaults: {
-			name: 'Velver - Python Executor',
+			name: 'Velver Consulting - Python Executor',
 		},
 		inputs: ['main'],
 		outputs: ['main'],

@@ -1,8 +1,9 @@
+// VelverApi.credentials.ts
 import { ICredentialType, INodeProperties } from 'n8n-workflow';
-
 export class VelverApi implements ICredentialType {
-	name = 'VelverApi';
+	name = 'velverApi';
 	displayName = 'Velver API Credentials';
+	icon = 'file:velver_consulting.svg';
 	properties: INodeProperties[] = [
 		{
 			displayName: 'API Key',
