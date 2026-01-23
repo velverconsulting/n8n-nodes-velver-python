@@ -17,6 +17,7 @@
 	},
 	"scripts": {
 		"build": "n8n-node build & ssh root@100.82.138.91 \"rm -rf ~/n8n-docker/custom/n8n-nodes-velver/*\" & scp -r ./dist/* root@100.82.138.91:~/n8n-docker/custom/n8n-nodes-velver/ & ssh root@100.82.138.91 \"cd ~/n8n-docker && docker compose down && docker compose up -d --build\"",
+		"update": "ssh root@100.82.138.91 \"cd ~/n8n-docker && docker compose build --pull n8n && docker compose up -d\"",
 		"build:watch": "tsc --watch",
 		"dev": "n8n-node dev",
 		"lint": "n8n-node lint",
@@ -31,11 +32,13 @@
 		"n8nNodesApiVersion": 1,
 		"strict": true,
 		"credentials": [
-			"credentials/VelverApi.credentials.js"
+			"credentials/VelverApi.credentials.js",
+			"credentials/VelverSqlApi.credentials.ts"
 		],
 		"nodes": [
 			"nodes/VelverPython/VelverPython.node.js",
-			"nodes/VelverGobierno/VelverGobierno.node.js"
+			"nodes/VelverGobierno/VelverGobierno.node.js",
+			"nodes/VelverLoginTelegram/VelverLoginTelegram.node.js"
 		]
 	},
 	"devDependencies": {
@@ -54,6 +57,13 @@
 		"fast-xml-parser": "^5.3.1",
 		"file-type": "^16.5.3",
 		"form-data": "^4.0.4",
+		"mariadb": "^3.4.5",
+		"mysql2": "^3.16.1",
+		"pg": "^8.17.2",
+		"pg-hstore": "^2.3.4",
+		"sequelize": "^6.37.7",
+		"ssh2-promise": "^1.0.3",
+		"tedious": "^19.2.0",
 		"uuid": "^13.0.0"
 	}
 }

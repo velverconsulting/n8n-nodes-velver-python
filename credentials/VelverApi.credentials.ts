@@ -1,8 +1,9 @@
 // VelverApi.credentials.ts
 import { ICredentialType, INodeProperties } from 'n8n-workflow';
+// eslint-disable-next-line @n8n/community-nodes/credential-test-required, n8n-nodes-base/cred-class-field-documentation-url-missing
 export class VelverApi implements ICredentialType {
 	name = 'velverApi';
-	displayName = 'Velver API Credentials';
+	displayName = 'Velver Credentials API';
 	icon = 'file:velver_consulting.svg';
 	properties: INodeProperties[] = [
 		{
