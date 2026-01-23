@@ -110,10 +110,6 @@ export async function runPython(script: string, inputs: string): Promise<PythonE
 	});
 }
 
-interface IToolNodeDescription extends INodeTypeDescription {
-	usableAsTool: boolean;
-}
-
 async function cleanupOldFiles(logger: Logger): Promise<void> {
 	logger.info(`Starting cleanup of old files in ${PY_FILES_DIR}...`);
 	try {
@@ -147,7 +143,7 @@ async function cleanupOldFiles(logger: Logger): Promise<void> {
 
 // --- Node Classes ---
 export class VelverPython implements INodeType {
-	description: IToolNodeDescription = {
+	description: INodeTypeDescription = {
 		displayName: 'Velver Consulting - Python Executor',
 		name: 'velverPython',
 		icon: 'file:VelverPython.icon.svg',

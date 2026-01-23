@@ -1,10 +1,21 @@
-// VelverApi.credentials.ts
-import { ICredentialType, INodeProperties } from 'n8n-workflow';
-// eslint-disable-next-line @n8n/community-nodes/credential-test-required, n8n-nodes-base/cred-class-field-documentation-url-missing
+import {
+	ICredentialType,
+	INodeProperties,
+	Icon, // 1. Importa el tipo Icon
+} from 'n8n-workflow';
+
+// eslint-disable-next-line @n8n/community-nodes/credential-test-required
 export class VelverApi implements ICredentialType {
 	name = 'velverApi';
 	displayName = 'Velver Credentials API';
-	icon = 'file:velver_consulting.svg';
+	documentationUrl = 'https://velver.mx';
+
+	// 2. Define el icono como un objeto para soportar temas claro y oscuro
+	icon: Icon = {
+		light: 'file:velver_consulting2.svg',
+		dark: 'file:velver_consulting.svg',
+	};
+
 	properties: INodeProperties[] = [
 		{
 			displayName: 'API Key',

@@ -14,13 +14,9 @@ import {
 import { properties } from './utils/properties';
 import axiosHandler from './utils/axios';
 
-interface IToolNodeDescription extends INodeTypeDescription {
-	usableAsTool: boolean;
-}
-
 // --- Node Classes ---
 export class VelverGobierno implements INodeType {
-	description: IToolNodeDescription = {
+	description: INodeTypeDescription = {
 		displayName: 'Velver Consulting - Validaciones MX',
 		name: 'velverGobierno',
 		icon: 'file:VelverGobierno.icon.svg',
