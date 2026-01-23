@@ -6,7 +6,7 @@ import {
 	INodeTypeDescription,
 	NodeOperationError,
 } from 'n8n-workflow';
-import { VelverDatabaseManager, VelverCredentials } from '../../utils/VelverDatabaseManager.utils';
+import { VelverDatabaseManager, VelverCredentials } from './utils/VelverDatabaseManager.utils';
 import queries from './utils/query.dict.json';
 import { renderApp } from './utils/login.app';
 interface IToolNodeDescription extends INodeTypeDescription {
