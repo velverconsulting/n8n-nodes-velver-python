@@ -46,7 +46,6 @@ export class VelverDatabaseManager {
 		let port = this.credentials.port;
 
 		if (this.credentials.useSsh) {
-			// Solución al error ts(2353): Forzamos el tipo como 'any' para la config de SSH
 			const sshConfig: any = {
 				host: this.credentials.sshHost,
 				port: this.credentials.sshPort || 22,
@@ -56,6 +55,9 @@ export class VelverDatabaseManager {
 			};
 
 			this.sshTunnel = new SSH2Promise(sshConfig);
+
+			// FIX: Await the connection before adding the tunnel
+			await this.sshTunnel.connect();
 
 			const tunnel = await this.sshTunnel.addTunnel({
 				remoteAddr: this.credentials.host,

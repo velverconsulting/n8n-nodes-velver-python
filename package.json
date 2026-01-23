@@ -33,7 +33,7 @@
 		"strict": true,
 		"credentials": [
 			"credentials/VelverApi.credentials.js",
-			"credentials/VelverSqlApi.credentials.ts"
+			"credentials/VelverSqlApi.credentials.js"
 		],
 		"nodes": [
 			"nodes/VelverPython/VelverPython.node.js",
