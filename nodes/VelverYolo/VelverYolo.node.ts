@@ -1,6 +1,6 @@
 /* eslint-disable @n8n/community-nodes/no-restricted-imports */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import {
-	IDataObject,
 	IExecuteFunctions,
 	INodeExecutionData,
 	INodeType,
@@ -8,34 +8,17 @@ import {
 	NodeOperationError,
 } from 'n8n-workflow';
 
-import * as ort from 'onnxruntime-node';
-import sharp from 'sharp';
-import * as crypto from 'crypto';
-
-/**
- * Interface for the node output data.
- */
-interface IYoloResult extends IDataObject {
-	modelType: string;
-	dimensions: readonly number[];
-	probabilities?: number[];
-	rawData?: number[];
-	fullDataLength?: number;
-	error?: string;
-}
+import axios from 'axios';
 
 export class VelverYolo implements INodeType {
-	private static session: ort.InferenceSession | null = null;
-	private static currentModelHash: string | null = null;
-
 	description: INodeTypeDescription = {
-		displayName: 'Velver Consulting - YOLO ONNX',
+		displayName: 'Velver Consulting - YOLO Ultralytics',
 		name: 'velverYolo',
 		icon: 'file:VelverYolo.icon.svg',
 		group: ['transform'],
 		version: 1,
-		description: 'Inference for YOLO models (Detect, Classify, Segment)',
-		defaults: { name: 'YOLO Executor' },
+		description: 'Inference using Ultralytics via remote API',
+		defaults: { name: 'YOLO Ultralytics' },
 		inputs: ['main'],
 		outputs: ['main'],
 		properties: [
@@ -45,7 +28,7 @@ export class VelverYolo implements INodeType {
 				type: 'string',
 				default: '',
 				required: true,
-				description: 'The .onnx model encoded in base64',
+				description: 'The YOLO model (.pt or .onnx) in base64 format',
 			},
 			{
 				displayName: 'Model Type',
@@ -57,14 +40,6 @@ export class VelverYolo implements INodeType {
 					{ name: 'Segmentation', value: 'segment' },
 				],
 				default: 'detect',
-				description: 'The task the model was trained for',
-			},
-			{
-				displayName: 'Image Size (Pixels)',
-				name: 'imgSize',
-				type: 'number',
-				default: 640,
-				description: 'Width/Height used during training (e.g., 640)',
 			},
 			{
 				displayName: 'Binary Property',
@@ -72,6 +47,13 @@ export class VelverYolo implements INodeType {
 				type: 'string',
 				default: 'data',
 				description: 'Name of the binary property containing the image',
+			},
+			{
+				displayName: 'Runner URL',
+				name: 'runnerUrl',
+				type: 'string',
+				default: 'http://py-runner:8000/yolo',
+				description: 'The URL of the Python runner YOLO endpoint',
 			},
 		],
 		usableAsTool: true,
@@ -85,96 +67,38 @@ export class VelverYolo implements INodeType {
 			try {
 				const modelBase64 = this.getNodeParameter('modelBase64', i) as string;
 				const modelType = this.getNodeParameter('modelType', i) as string;
-				const imgSize = this.getNodeParameter('imgSize', i) as number;
 				const binaryPropertyName = this.getNodeParameter('binaryPropertyName', i) as string;
-
-				// Cache logic based on hash
-				await VelverYolo.ensureModelLoaded(modelBase64);
-
-				const binaryData = items[i].binary;
-				if (!binaryData || !binaryData[binaryPropertyName]) {
-					throw new NodeOperationError(this.getNode(), 'No binary data found');
-				}
+				const runnerUrl = this.getNodeParameter('runnerUrl', i) as string;
 
 				const imageBuffer = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
 
-				// Preprocess to Float32 Tensor
-				const tensor = await VelverYolo.preprocess(imageBuffer, imgSize);
-
-				const feeds: Record<string, ort.Tensor> = {};
-				const session = VelverYolo.session;
-
-				if (!session) {
-					throw new NodeOperationError(this.getNode(), 'ONNX session initialization failed');
-				}
-
-				feeds[session.inputNames[0]] = tensor;
-
-				const output = await session.run(feeds);
-				const mainOutput = output[session.outputNames[0]];
-
-				const result: IYoloResult = {
-					modelType,
-					dimensions: mainOutput.dims,
-				};
-
-				if (modelType === 'classify') {
-					result.probabilities = Array.from(mainOutput.data as Float32Array);
-				} else {
-					// Return sample data to avoid massive JSON overhead
-					result.rawData = Array.from(mainOutput.data as Float32Array).slice(0, 100);
-					result.fullDataLength = mainOutput.data.length;
-				}
+				const response = await axios.post(
+					runnerUrl,
+					{
+						modelBase64,
+						modelType,
+						imageBuffer: imageBuffer.toString('base64'),
+					},
+					{
+						maxContentLength: Infinity,
+						maxBodyLength: Infinity,
+						timeout: 120000, // 2 minutes for heavy AI tasks
+					},
+				);
 
 				returnData.push({
-					json: result,
+					json: response.data,
 					pairedItem: { item: i },
 				});
-			} catch (error: unknown) {
-				const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+			} catch (error: any) {
 				if (this.continueOnFail()) {
-					const errorResult: IYoloResult = {
-						modelType: 'error',
-						dimensions: [],
-						error: errorMessage,
-					};
-					returnData.push({ json: errorResult });
+					returnData.push({ json: { error: error.message }, pairedItem: { item: i } });
 					continue;
 				}
-				throw error;
+				throw new NodeOperationError(this.getNode(), error.message);
 			}
 		}
 
 		return [returnData];
-	}
-
-	private static async ensureModelLoaded(modelBase64: string): Promise<void> {
-		const newHash = crypto.createHash('md5').update(modelBase64).digest('hex');
-
-		if (VelverYolo.session && VelverYolo.currentModelHash === newHash) {
-			return;
-		}
-
-		const modelBuffer = Buffer.from(modelBase64, 'base64');
-		VelverYolo.session = await ort.InferenceSession.create(modelBuffer);
-		VelverYolo.currentModelHash = newHash;
-	}
-
-	private static async preprocess(imageBuffer: Buffer, size: number): Promise<ort.Tensor> {
-		const { data } = await sharp(imageBuffer)
-			.resize(size, size, { fit: 'fill' })
-			.raw()
-			.toBuffer({ resolveWithObject: true });
-
-		const floatData = new Float32Array(3 * size * size);
-
-		// HWC (Height, Width, Channel) to CHW normalization
-		for (let c = 0; c < 3; c++) {
-			for (let i = 0; i < size * size; i++) {
-				floatData[c * size * size + i] = data[i * 3 + c] / 255.0;
-			}
-		}
-
-		return new ort.Tensor('float32', floatData, [1, 3, size, size]);
 	}
 }
