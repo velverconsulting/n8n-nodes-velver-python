@@ -23,12 +23,12 @@ export class VelverYolo implements INodeType {
 		outputs: ['main'],
 		properties: [
 			{
-				displayName: 'Model Base64',
-				name: 'modelBase64',
+				displayName: 'Model URL',
+				name: 'modelUrl',
 				type: 'string',
 				default: '',
 				required: true,
-				description: 'The YOLO model (.pt or .onnx) in base64 format',
+				description: 'Public URL of the YOLO model (.pt or .onnx)',
 			},
 			{
 				displayName: 'Model Type',
@@ -55,6 +55,13 @@ export class VelverYolo implements INodeType {
 				default: 'http://py-runner:8000/yolo',
 				description: 'The URL of the Python runner YOLO endpoint',
 			},
+			{
+				displayName: 'Clear Cache',
+				name: 'clearCache',
+				type: 'boolean',
+				default: false,
+				description: 'Whether to force download the model and clear the previous cached version',
+			},
 		],
 		usableAsTool: true,
 	};
@@ -65,26 +72,44 @@ export class VelverYolo implements INodeType {
 
 		for (let i = 0; i < items.length; i++) {
 			try {
-				const modelBase64 = this.getNodeParameter('modelBase64', i) as string;
+				const modelUrl = this.getNodeParameter('modelUrl', i) as string;
 				const modelType = this.getNodeParameter('modelType', i) as string;
-				const binaryPropertyName = this.getNodeParameter('binaryPropertyName', i) as string;
 				const runnerUrl = this.getNodeParameter('runnerUrl', i) as string;
+				const binaryPropertyName = this.getNodeParameter('binaryPropertyName', i) as string;
+				const clearCache = this.getNodeParameter('clearCache', i, false) as boolean;
+
+				if (!items[i].binary || !items[i].binary![binaryPropertyName]) {
+					throw new NodeOperationError(
+						this.getNode(),
+						`Binary property "${binaryPropertyName}" not found on the input item.`,
+						{ itemIndex: i },
+					);
+				}
 
 				const imageBuffer = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
 
 				const response = await axios.post(
 					runnerUrl,
 					{
-						modelBase64,
+						modelUrl,
 						modelType,
+						clearCache,
 						imageBuffer: imageBuffer.toString('base64'),
 					},
 					{
 						maxContentLength: Infinity,
 						maxBodyLength: Infinity,
-						timeout: 120000, // 2 minutes for heavy AI tasks
+						timeout: 300000, // Increased timeout for model downloads
 					},
 				);
+
+				if (response.data && response.data.success === false) {
+					throw new NodeOperationError(
+						this.getNode(),
+						response.data.error || 'The remote runner returned a failure status.',
+						{ itemIndex: i },
+					);
+				}
 
 				returnData.push({
 					json: response.data,
@@ -92,10 +117,14 @@ export class VelverYolo implements INodeType {
 				});
 			} catch (error: any) {
 				if (this.continueOnFail()) {
-					returnData.push({ json: { error: error.message }, pairedItem: { item: i } });
+					returnData.push({
+						json: { success: false, error: error.message },
+						pairedItem: { item: i },
+					});
 					continue;
 				}
-				throw new NodeOperationError(this.getNode(), error.message);
+				if (error instanceof NodeOperationError) throw error;
+				throw new NodeOperationError(this.getNode(), error, { itemIndex: i });
 			}
 		}
 
