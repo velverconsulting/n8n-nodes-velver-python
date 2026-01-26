@@ -16,6 +16,15 @@ export class VelverSqlApi implements ICredentialType {
 	properties: INodeProperties[] = [
 		// --- DATABASE ENGINE ---
 		{
+			displayName: 'Telegram Bot Token',
+			name: 'telegramToken',
+			type: 'string',
+			typeOptions: { password: true },
+			default: '',
+			description: 'Optional: The token for your Telegram Bot',
+		},
+
+		{
 			displayName: 'Database Type',
 			name: 'dbType',
 			type: 'options',

@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-velver",
-	"version": "0.1.0",
+	"version": "0.1.77",
 	"description": "Run custom python code without limitations",
 	"license": "MIT",
 	"homepage": "",
@@ -16,7 +16,8 @@
 		"url": "https://github.com/velverconsulting/n8n-nodes-velver-python.git"
 	},
 	"scripts": {
-		"build": "n8n-node build &&  ssh root@100.82.138.91 \"rm -rf ~/n8n-docker/custom/n8n-nodes-velver/*\" &&  scp -r ./dist/* root@100.82.138.91:~/n8n-docker/custom/n8n-nodes-velver/ && ssh root@100.82.138.91 \"cd ~/n8n-docker && docker compose restart n8n\"",
+		"build": "npm version patch --no-git-tag-version && n8n-node build && scp -r ./dist/* root@100.82.138.91:~/n8n-docker/custom/n8n-nodes-velver/ && scp ./py-runner/server.py root@100.82.138.91:~/n8n-docker/py-runner/server.py && ssh root@100.82.138.91 \"docker restart py-runner n8n\"",
+		"deploy": "n8n-node build &&  ssh root@100.82.138.91 \"rm -rf ~/n8n-docker/custom/n8n-nodes-velver/*\" &&  scp -r ./dist/* root@100.82.138.91:~/n8n-docker/custom/n8n-nodes-velver/ && ssh root@100.82.138.91 \"cd ~/n8n-docker && docker compose restart n8n\"",
 		"build:watch": "tsc --watch",
 		"dev": "n8n-node dev",
 		"lint": "n8n-node lint",
@@ -43,6 +44,7 @@
 	},
 	"devDependencies": {
 		"@n8n/node-cli": "*",
+		"@types/jsonwebtoken": "^9.0.10",
 		"@types/node": "^24.10.0",
 		"@types/sharp": "^0.31.1",
 		"@vercel/ncc": "^0.38.4",
@@ -60,6 +62,7 @@
 		"fast-xml-parser": "^5.3.1",
 		"file-type": "^16.5.3",
 		"form-data": "^4.0.5",
+		"jsonwebtoken": "^9.0.3",
 		"mariadb": "^3.4.5",
 		"mysql2": "^3.16.1",
 		"pg": "^8.17.2",

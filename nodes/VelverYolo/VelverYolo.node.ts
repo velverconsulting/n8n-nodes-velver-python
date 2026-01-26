@@ -42,11 +42,13 @@ export class VelverYolo implements INodeType {
 				default: 'detect',
 			},
 			{
-				displayName: 'Binary Property',
-				name: 'binaryPropertyName',
+				displayName: 'Image Base64',
+				name: 'imageBase64',
 				type: 'string',
-				default: 'data',
-				description: 'Name of the binary property containing the image',
+				default: '',
+				required: true,
+				description:
+					'The Base64 string of the image. Use an expression (e.g. {{$JSON.data}}) to map it.',
 			},
 			{
 				displayName: 'Runner URL',
@@ -75,18 +77,18 @@ export class VelverYolo implements INodeType {
 				const modelUrl = this.getNodeParameter('modelUrl', i) as string;
 				const modelType = this.getNodeParameter('modelType', i) as string;
 				const runnerUrl = this.getNodeParameter('runnerUrl', i) as string;
-				const binaryPropertyName = this.getNodeParameter('binaryPropertyName', i) as string;
+				// Ahora obtenemos el valor directo, ya resuelto por n8n
+				const imageBase64Input = this.getNodeParameter('imageBase64', i) as string;
 				const clearCache = this.getNodeParameter('clearCache', i, false) as boolean;
 
-				if (!items[i].binary || !items[i].binary![binaryPropertyName]) {
-					throw new NodeOperationError(
-						this.getNode(),
-						`Binary property "${binaryPropertyName}" not found on the input item.`,
-						{ itemIndex: i },
-					);
+				if (!imageBase64Input) {
+					throw new NodeOperationError(this.getNode(), 'The "Image Base64" parameter is empty.', {
+						itemIndex: i,
+					});
 				}
 
-				const imageBuffer = await this.helpers.getBinaryDataBuffer(i, binaryPropertyName);
+				// Limpiamos el header del base64 si existe (ej: "data:image/png;base64,")
+				const base64Image = imageBase64Input.replace(/^data:image\/[a-z]+;base64,/, '');
 
 				const response = await axios.post(
 					runnerUrl,
@@ -94,12 +96,12 @@ export class VelverYolo implements INodeType {
 						modelUrl,
 						modelType,
 						clearCache,
-						imageBuffer: imageBuffer.toString('base64'),
+						imageBuffer: base64Image,
 					},
 					{
 						maxContentLength: Infinity,
 						maxBodyLength: Infinity,
-						timeout: 300000, // Increased timeout for model downloads
+						timeout: 300000,
 					},
 				);
 

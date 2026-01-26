@@ -19,6 +19,7 @@ export interface VelverCredentials {
 	sshUser?: string;
 	sshPassword?: string;
 	sshPrivateKey?: string;
+	telegramToken?: string;
 }
 
 export class VelverDatabaseManager {
@@ -112,14 +113,18 @@ export class VelverDatabaseManager {
 	async executeQuery<T = unknown>(sql: string, params: Record<string, unknown> = {}): Promise<T[]> {
 		await this.ensureConnection();
 		try {
-			const results = await this.sequelize!.query(sql, {
+			// RAW supports SELECT/UPDATE/INSERT consistently
+			const [results] = await this.sequelize!.query(sql, {
 				replacements: params,
-				type: QueryTypes.SELECT,
+				type: QueryTypes.RAW,
 			});
-			return results as T[];
-		} catch (error) {
+
+			// Normalize: SELECT => array, UPDATE/INSERT => ResultSetHeader/object
+			return (Array.isArray(results) ? results : [results]) as T[];
+		} catch (error: any) {
 			const message = error instanceof Error ? error.message : 'DB Error';
-			throw new Error(`[VelverDatabaseManager] ${message}`);
+			const keys = Object.keys(params).join(', ');
+			throw new Error(`[VelverDatabaseManager] ${message} | Sent keys: [${keys}]`);
 		}
 	}
 

@@ -5,8 +5,10 @@ export function renderApp(
 	webhook: string,
 	language: string,
 	name: string,
-	logo: string = defaultLogo,
+	logo: string | undefined = undefined,
+	isDbConnected: boolean = false,
 ): string {
+	if (!logo) logo = defaultLogo;
 	return `
     <!DOCTYPE html>
     <html lang="${language}">
@@ -28,6 +30,21 @@ export function renderApp(
                 --error: #eb4034;
                 --radius: 14px;
             }
+
+            /* --- INDICADOR DE STATUS (EL PUNTITO) --- */
+            .db-status-dot {
+                position: fixed;
+                top: 15px;
+                right: 15px;
+                width: 10px;
+                height: 10px;
+                border-radius: 50%;
+                z-index: 999999;
+                border: 1.5px solid white; /* Para que resalte en cualquier fondo */
+                box-shadow: 0 0 4px rgba(0,0,0,0.3);
+            }
+            .online { background-color: var(--success) !important; }
+            .offline { background-color: var(--error) !important; }
 
             body {
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -141,9 +158,11 @@ export function renderApp(
         </style>
     </head>
     <body>
+        <div class="db-status-dot ${isDbConnected ? 'online' : 'offline'}"></div>
+
         <div class="card">
             <div class="logo-container">
-                <img id="app-logo" src="" alt="Logo" class="logo-img">
+                <img id="app-logo" src="${logo}" alt="Logo" class="logo-img">
             </div>
             <h2 id="title"></h2>
             <p id="description"></p>
@@ -225,6 +244,7 @@ export function renderApp(
                     retry: "Retry",
                     alert_user: "Please enter a username",
                     alert_match: "Passwords do not match",
+                    invalid_creds: "Invalid password",
                     alert_error: "Connection error",
                     user_not_found: "User not found",
                     success_login: "Login Successful",
@@ -249,6 +269,7 @@ export function renderApp(
                     retry: "Reintentar",
                     alert_user: "Ingresa un usuario",
                     alert_match: "No coinciden",
+                    invalid_creds: "Contraseña incorrecta",
                     alert_error: "Error de conexión",
                     user_not_found: "Usuario no encontrado",
                     success_login: "Inicio de sesión exitoso",
@@ -286,9 +307,16 @@ export function renderApp(
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ ...payload, chat_id: tg.initDataUnsafe.user?.id })
                     });
-                    return await response.json();
+
+                    const data = await response.json();
+                    if (data.status === 'error') {
+                        tg.showAlert(t?.[message] || data.message || t.alert_error);
+                        return data;
+                    }
+
+                    return data;
                 } catch (e) {
-                    tg.showAlert(t.alert_error);
+                    tg.showAlert(t.alert_error + ": " + e.message);
                     return null;
                 }
             }
@@ -320,36 +348,39 @@ export function renderApp(
             });
 
             document.getElementById('loginBtn').addEventListener('click', async () => {
-                const pass = document.getElementById('password').value;
-                const res = await apiCall({ action: "login", user: currentUser, pass });
-                if (res?.status === "ok") {
-                    tg.sendData(JSON.stringify({ action: "login_success", user: currentUser }));
+                const password = document.getElementById('password').value;
+                const res = await apiCall({ action: "login", user: currentUser, password });
+                if (res?.status === "success") {
                     showStep("step-success", "", "");
                     document.getElementById("success-title").innerText = t.success_login;
-                    await wait(3000);
+                    await wait(1500);
                     tg.close();
-                } else tg.showAlert(res?.message || "Error");
+                } else if (res?.status === "invalid") {
+                    tg.showAlert(t.invalid_creds);
+                } else {
+                    tg.showAlert(res?.message || t.alert_error);
+                }
             });
 
             document.getElementById('setBtn').addEventListener('click', async () => {
                 const p1 = document.getElementById('new_pass').value;
                 if (p1 !== document.getElementById('repeat_pass').value) return tg.showAlert(t.alert_match);
-                const res = await apiCall({ action: "new_password", user: currentUser, pass: p1 });
-                if (res?.status === "ok") {
+                const res = await apiCall({ action: "new_password", user: currentUser, password: p1 });
+                if (res?.status === "success") {
                     tg.sendData(JSON.stringify({ action: "setup_success", user: currentUser }));
                     showStep("step-success", "", "");
                     document.getElementById("success-title").innerText = t.success_save;
-                    await wait(3000);
+                    await wait(1500);
                     tg.close();
                 } else tg.showAlert("Error");
             });
 
             document.getElementById('confirmLogoutBtn').addEventListener('click', async () => {
-                await apiCall({ action: "logout_confirm" });
+                await apiCall({ action: "logout" });
                 tg.sendData(JSON.stringify({ action: "logout_success" }));
                 showStep("step-success", "", "");
                 document.getElementById("success-title").innerText = t.success_logout;
-                await wait(3000);
+                await wait(1500);
                 tg.close();
             });
 

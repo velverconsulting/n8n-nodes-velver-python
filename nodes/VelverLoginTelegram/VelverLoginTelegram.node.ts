@@ -1,3 +1,4 @@
+/* eslint-disable @n8n/community-nodes/no-restricted-imports */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {
 	IWebhookFunctions,
@@ -6,10 +7,18 @@ import {
 	INodeTypeDescription,
 	NodeOperationError,
 } from 'n8n-workflow';
-// eslint-disable-next-line import-x/no-unresolved
 import { VelverDatabaseManager, VelverCredentials } from './utils/VelverDatabaseManager.utils';
 import queries from './utils/query.dict.json';
 import { renderApp } from './utils/login.app';
+import { createHash } from 'crypto';
+import * as jwt from 'jsonwebtoken';
+
+interface SqlResultRow {
+	status?: string;
+	success?: boolean | number;
+	SUCCESS?: boolean | number;
+	[key: string]: any;
+}
 
 export class VelverLoginTelegram implements INodeType {
 	private static dbManager: VelverDatabaseManager | null = null;
@@ -21,7 +30,7 @@ export class VelverLoginTelegram implements INodeType {
 		icon: 'file:VelverLoginTelegram.icon.svg',
 		group: ['trigger'],
 		version: 1,
-		description: 'Full lifecycle auth for Telegram Mini Apps',
+		description: 'Secure Telegram Mini App auth lifecycle with SHA-256',
 		usableAsTool: true,
 		defaults: { name: 'Telegram Login Flow' },
 		inputs: [],
@@ -35,9 +44,9 @@ export class VelverLoginTelegram implements INodeType {
 				path: '={{$parameter["path"]}}',
 			},
 			{
-				name: 'default',
+				name: 'setup',
 				httpMethod: 'POST',
-				responseMode: 'onReceived',
+				responseMode: 'lastNode',
 				path: '={{$parameter["path"]}}',
 			},
 		],
@@ -50,17 +59,19 @@ export class VelverLoginTelegram implements INodeType {
 				required: true,
 			},
 			{
+				displayName: 'Entry/Exit Messages URL',
+				name: 'main-webook',
+				type: 'string',
+				default: '',
+				required: true,
+			},
+			{
 				displayName: 'Business Name',
 				name: 'businessName',
 				type: 'string',
 				default: 'Velver Consulting',
 			},
-			{
-				displayName: 'Logo URL',
-				name: 'logoUrl',
-				type: 'string',
-				default: '',
-			},
+			{ displayName: 'Logo URL', name: 'logoUrl', type: 'string', default: '' },
 			{
 				displayName: 'Default Language',
 				name: 'language',
@@ -71,21 +82,16 @@ export class VelverLoginTelegram implements INodeType {
 				],
 				default: 'es',
 			},
-			{
-				displayName: 'Telegram Bot Token',
-				name: 'telegramToken',
-				type: 'string',
-				typeOptions: { password: true },
-				default: '',
-				required: true,
-			},
 		],
 	};
 
-	/**
-	 * 2. Método estático para que no dependa del 'this' del webhook
-	 */
-	private static async getDbManager(context: IWebhookFunctions): Promise<VelverDatabaseManager> {
+	private static hashPassword(password: string): string {
+		return createHash('sha256').update(password).digest('hex');
+	}
+
+	private static async getDbManager(
+		context: IWebhookFunctions,
+	): Promise<{ db: VelverDatabaseManager; telegramToken?: string }> {
 		const credentials = (await context.getCredentials(
 			'velverSqlApi',
 		)) as unknown as VelverCredentials;
@@ -105,80 +111,178 @@ export class VelverLoginTelegram implements INodeType {
 			this.credentialFingerprint = fingerprint;
 		}
 
-		return this.dbManager;
+		return {
+			db: this.dbManager,
+			telegramToken: credentials.telegramToken,
+		};
 	}
 
 	async webhook(this: IWebhookFunctions): Promise<IWebhookResponseData> {
-		const webhookUrl = this.getNodeWebhookUrl('default') as string;
+		const runQuery = async (
+			db: VelverDatabaseManager,
+			query: string,
+			params: Record<string, any>,
+		): Promise<[SqlResultRow[], SqlResultRow]> => {
+			const result = await db.executeQuery(query, params);
+			const rows = (Array.isArray(result) ? result : [result]) as SqlResultRow[];
+			const firstRow = rows[0] || ({} as SqlResultRow);
+			return [rows, firstRow];
+		};
+
+		const webhookUrl = this.getNodeWebhookUrl('setup') as string;
 		const req = this.getRequestObject();
 		const method = req.method.toUpperCase();
-		const res = this.getResponseObject();
 
 		const businessName = this.getNodeParameter('businessName') as string;
 		const logoUrl = this.getNodeParameter('logoUrl') as string;
 		const lang = this.getNodeParameter('language') as string;
+		const main_webook = this.getNodeParameter('main-webook') as string;
 
 		try {
-			// 3. Llamamos al método estático usando el nombre de la Clase
-
+			// --- Interface Delivery (GET) ---
 			if (method === 'GET') {
-				res.status(200).contentType('text/html');
+				const logoToPass = logoUrl?.trim() ? logoUrl : undefined;
+				const dbConnected = true;
+
+				const html = renderApp(webhookUrl, lang, businessName, logoToPass, dbConnected);
+				const res = this.getResponseObject();
+
+				res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).send(html);
+
 				return {
-					webhookResponse: renderApp(webhookUrl, lang, businessName, logoUrl),
+					noWebhookResponse: true,
 				};
 			}
 
+			// --- API Logic (POST) ---
 			if (method === 'POST') {
-				const db = await VelverLoginTelegram.getDbManager(this);
+				const { db, telegramToken } = await VelverLoginTelegram.getDbManager(this);
 				const body = this.getBodyData();
 				const action = String(body.action || '');
-				const { chat_id, user, new_password } = body;
+				const { chat_id, user, password } = body;
+
 				let params: Record<string, unknown> = {};
+				const rawPassword = (body.password || password || '') as string;
 
 				switch (action) {
 					case 'init':
+					case 'logout':
 						params = { chat_id };
 						break;
 					case 'check_user':
 						params = { user };
 						break;
 					case 'new_password':
-						params = { new_password, user };
-						break;
 					case 'login':
-						params = { user, new_password };
-						break;
-					case 'logout_confirm':
-						params = { chat_id };
+						params = { user, pass_hash: VelverLoginTelegram.hashPassword(rawPassword) };
 						break;
 					default:
-						params = {};
+						throw new NodeOperationError(this.getNode(), `Action "${action}" not implemented.`);
 				}
+
 				const motorQueries = (queries as any)[db.motor];
+				if (!motorQueries?.[action])
+					throw new NodeOperationError(this.getNode(), `Query missing: ${action} for ${db.motor}`);
 
-				if (!motorQueries || !motorQueries[action]) {
-					throw new NodeOperationError(
-						this.getNode(),
-						`No se encontró el query para la acción "${action}" en el motor "${db.motor}"`,
-					);
+				const [result, firstRow] = await runQuery(db, motorQueries[action], params);
+
+				let message = '';
+				let status = 'success';
+				let token = '';
+				if (action === 'init') {
+					status = firstRow?.status || 'login';
+				} else if (action === 'logout') {
+					await fetch(main_webook, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							action: 'logout',
+							chat_id: chat_id,
+						}),
+					});
+				} else if (action === 'check_user') {
+					status = firstRow?.status || 'not_found';
+				} else if (action === 'login') {
+					const success = firstRow?.success || firstRow?.SUCCESS;
+
+					if (success === true || success === 1) {
+						await runQuery(db, motorQueries['success_login'], { chat_id, user });
+						if (telegramToken) {
+							const nowInSeconds = Math.floor(Date.now() / 1000);
+							const durationSeconds = 12 * 60 * 60;
+							const expiresAtSeconds = nowInSeconds + durationSeconds;
+							const jwt_token = jwt.sign(
+								{
+									user,
+									chat_id,
+									created_at: nowInSeconds,
+									expires_at: expiresAtSeconds,
+								},
+								telegramToken,
+								{ expiresIn: '12h' },
+							);
+							token = jwt_token;
+						}
+						await fetch(main_webook, {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({
+								action: 'auth_complete',
+								chat_id: chat_id,
+								token,
+							}),
+						});
+						status = 'success';
+					} else {
+						status = 'invalid';
+						message = 'invalid_creds';
+					}
 				}
-				const sql = motorQueries[action];
-				const result = await db.executeQuery(sql, params);
+				const responseBody = {
+					status,
+					username: firstRow?.username || firstRow?.user || '',
+					chat_id,
+					message,
+					action,
+					data: result,
+				};
 
-				res.status(200).contentType('application/json');
 				return {
 					webhookResponse: {
-						status: 'success',
-						action,
-						data: result,
+						statusCode: 200,
+						headers: { 'Content-Type': 'application/json; charset=utf-8' },
+						body: responseBody,
 					},
+					workflowData: [[{ json: responseBody }]],
 				};
 			}
-		} catch (error) {
-			throw new NodeOperationError(this.getNode(), error as Error);
-		}
+		} catch (error: any) {
+			this.logger.error(`[VelverLoginTelegram] ${error.message}`);
 
-		res.status(405).send();
-		return { webhookResponse: 405 };
+			const env = this.getNodeParameter('environment', 'prd') as string;
+
+			const errorPayload = {
+				status: 'error',
+				message: error.message,
+				...(env === 'dev' && { stack: error.stack, context: 'catch_block' }),
+			};
+
+			return {
+				webhookResponse: {
+					statusCode: 500,
+					headers: { 'Content-Type': 'application/json; charset=utf-8' },
+					body: errorPayload,
+				},
+				workflowData: [[{ json: errorPayload }]],
+			};
+		}
+		return {
+			webhookResponse: {
+				statusCode: 405,
+				headers: { 'Content-Type': 'application/json; charset=utf-8' },
+				body: { error: 'Method Not Allowed' },
+			},
+			workflowData: [[{ json: { status: 405, message: 'Method Not Allowed' } }]],
+		};
 	}
 }
