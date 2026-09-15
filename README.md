@@ -118,23 +118,165 @@ Make sure your node is registered in the `n8n.nodes` array.
 
 ### 6. Develop and Test Locally
 
-Start n8n with your node loaded:
+Este proyecto usa **pnpm** y n8n instalado globalmente con pnpm, en lugar de
+dejar que el CLI reinstale n8n con `npx` en cada arranque.
+
+Preparacion (una sola vez):
 
 ```bash
-npm run dev
+pnpm install
+pnpm setup:n8n
 ```
 
-This command runs `n8n-node dev` which:
+`pnpm setup:n8n` instala n8n globalmente con pnpm y le deja listo el binario
+nativo de `sqlite3`. Ese segundo paso hace falta porque pnpm no ejecuta los
+scripts de build de las dependencias, y sin el binario n8n muere al arrancar con
+`SQLite package has not been found installed`. El script baja el prebuild NAPI,
+que no necesita compilador.
 
-- Builds your node with watch mode
-- Starts n8n with your node available
-- Automatically rebuilds when you make changes
-- Opens n8n in your browser (usually http://localhost:5678)
+Luego, en **dos terminales**:
+
+```bash
+pnpm dev       # compila el nodo en watch y lo enlaza al user folder de n8n
+pnpm dev:n8n   # levanta n8n en http://localhost:5678
+```
+
+- `pnpm dev` corre `n8n-node dev --external-n8n`: compila a `dist/` en watch.
+- `pnpm dev:n8n` enlaza `dist/` dentro de `~/.n8n-node-cli/.n8n/custom/node_modules`
+  y arranca n8n con `N8N_DEV_RELOAD=true` para que recargue tras cada build.
+
+> [!IMPORTANT]
+> El enlace apunta a `dist/`, no a la raiz del proyecto, porque las rutas de
+> `n8n.nodes` en `package.json` van sin el prefijo `dist/` (asi las necesita
+> `pnpm deploy`, que copia el contenido de `dist/` al servidor). El symlink que
+> crea el CLI por su cuenta apunta a la raiz y n8n no encuentra los `.js`.
+
+> [!NOTE]
+> n8n 2.x requiere **Node >= 24**. El `engines.runtime` de `package.json` hace
+> que pnpm descargue y use Node 24 solo para este proyecto, sin tocar el Node
+> del sistema.
+
+Si prefieres el modo original (n8n embebido, lo instala con `npx` y tarda
+varios minutos cada arranque):
+
+```bash
+pnpm dev:bundled
+```
 
 You can now test your node in n8n workflows!
 
 > [!NOTE]
 > Learn more about CLI commands in the [@n8n/node-cli documentation](https://www.npmjs.com/package/@n8n/node-cli).
+
+#### Velver Process Form y Velver Process Form Trigger (`<vc-process>` / `<vc-form>`)
+
+Los dos nodos sirven una página con el formulario por etapas del front de
+proyecto_x y entregan el registro capturado como item (los archivos llegan como
+binarios). Cambia cuándo corre el workflow, igual que *Form Trigger* y *Form* en
+n8n:
+
+| Nodo | URL | Qué hace el envío |
+|---|---|---|
+| **Velver Process Form Trigger** | fija: `/form/<ruta>` (prueba: `/form-test/<ruta>`) | **inicia** una ejecución nueva |
+| **Velver Process Form** | un link por ejecución: `$execution.resumeFormUrl` (`/form-waiting/<id>`) | **reanuda** la ejecución que esperaba |
+
+Usa el trigger cuando el formulario es la entrada del proceso. Usa el nodo de
+link cuando el formulario va a mitad del flujo: precargar datos de nodos
+anteriores (`Datos Iniciales` admite expresiones sobre el item) o pedir una
+captura/aprobación y seguir.
+
+En modo prueba, el editor de n8n abre solo el formulario del nodo de link, pero
+no el del trigger (esa apertura automática está fija para el Form Trigger nativo):
+pulsa *Execute step* y abre la *Test URL* que muestra el nodo.
+
+El código de los componentes **no se copia**: `proyecto_x/front` sigue siendo la
+fuente de verdad y aquí solo vive una foto compilada en
+`nodes/VelverProcessForm/assets/vcProcess.bundle.json`. Para actualizarla después
+de cambiar `vc-process` o `vc-form`:
+
+```bash
+pnpm build:vc-process                          # usa D:/proyecto_x/front
+VC_FRONT_DIR=/ruta/al/front pnpm build:vc-process
+VC_BUNDLE_REPORT=1 pnpm build:vc-process       # además imprime el peso por paquete
+```
+
+**Configuración: un solo estado.** La interfaz del nodo tiene la misma forma que
+vc-process: *Etapas* (título y descripción) → *Secciones* (subtítulo) → *Campos*.
+Cada campo lleva etiqueta, tipo, obligatorio, **deshabilitado**, **oculto**
+(`hideInForm`), **valor por defecto** (admite expresiones; se convierte al tipo
+del campo), opciones y «Más opciones».
+
+*JSON avanzado* es opcional y **complementa** la interfaz en vez de reemplazarla:
+*Campos (JSON)* mezcla propiedades por clave (`{"curp": {"pattern": "…"}}`) o
+acepta un `FieldConfig[]`; *Proceso (JSON)* se mezcla sobre el proceso
+(`presets`, `title`; `stages` reemplaza las etapas); *Datos iniciales (JSON)* se
+suma a los valores por defecto. Con *Etapas* vacías, el JSON avanzado define el
+formulario completo. No hay selector de modo a propósito: el editor de n8n
+descarta los parámetros que quedan ocultos, y cambiar de modo borraba lo
+capturado. La transformación a `ProcessConfig`/`FieldConfig[]` ocurre en cada
+ejecución; para ver el resultado, abre la URL de **prueba** con `?json` (en
+producción no existe).
+
+Lo que la persona no puede editar queda impuesto por el servidor: campos
+deshabilitados u ocultos conservan su valor (por defecto o pre-rellenado) aunque
+la página mande otro, salvo los calculados; los `presets` siempre mandan. Un
+campo oculto nunca es obligatorio.
+
+**Sobre cifrado.** Como en proyecto_x, nada del formulario viaja legible: el
+HTML solo trae el bundle; la página pide el challenge (POST a la misma URL con
+`x-vc-challenge`), recibe la configuración sellada con el sobre v2 y envía el
+registro sellado (`{content: "v2.<win>.<blob>"}` + cabeceras rotadas). Un POST
+sin sobre válido recibe `400 solicitud no válida` + `x-vc-env: renew`. El núcleo
+está portado de `back/src/security/envelopeV2.js` y la página usa el
+`EnvelopeAgent` original del front; si cambia la derivación allá, hay que
+cambiar `utils/envelope.ts` y reconstruir el bundle. El secreto se genera por
+proceso de n8n: tras un reinicio, las páginas abiertas renuevan el challenge
+solas.
+
+No dependen del backend de proyecto_x: etapas, secciones, validación de
+requeridos y formatos, `show_if` / `enabled_if` / `calculation` (JSONata),
+opciones estáticas y `presets` (el nodo los vuelve a sellar al recibir el envío).
+Sí dependen de él, y por eso **no** funcionan aquí: combos con opciones de una
+tabla (`query`/`search`), secciones de partidas (`childTable`), documentos Word,
+importar Excel y el visor del SAT.
+
+**Teléfono.** `<vc-tel>` pide la tabla global `paises` al backend; el build lo
+cambia por `scripts/stubs/vc-tel-countries.ts`, que trae solo ISO-2 + lada
+empaquetados desde `back/src/data/global/rows/paises.json` (~1.2 KB), toma los
+nombres de `Intl.DisplayNames` y deja las banderas a flagcdn (sin emojis).
+
+**Opciones de listas.** En campos de lista desplegable, lista con búsqueda y
+radio, *Opciones como* elige entre capturarlas una por una (*Lista*) o en *JSON*:
+arreglo de `{label, value}`, arreglo de textos (`["Norte", "Sur"]`) u objeto
+`{valor: texto}`. El JSON admite expresiones, así que un catálogo que trae un nodo
+anterior se usa directo.
+
+**Pre-relleno cifrado.** Con «Permitir pre-relleno cifrado» en el trigger, el
+formulario acepta `?p=<token>` para abrir con algunos campos llenos. El token lo
+genera el nodo **Velver Form Prefill** (URL del formulario + pares clave/valor
+con expresiones + vencimiento opcional); ambos usan la misma credencial *Velver
+Form Prefill API*. Es AES-256-GCM: no se puede leer ni alterar sin el secreto,
+solo el servidor lo abre y los valores llegan a la página dentro de la
+configuración sellada. Se convierten al tipo del campo, las claves que no son
+campos se ignoran y en un campo deshabilitado el valor queda impuesto (sirve
+para fijar datos por enlace, como el id de un cliente). Un token alterado, de
+otra credencial o vencido muestra un aviso en lugar del formulario.
+
+**Columnas.** El parámetro *Columnas* (1, 2 o 3; 2 por defecto) aplica a todas
+las secciones: vc-process pasa el mismo número a cada una. En pantallas angostas
+los campos siempre se apilan. Cada campo puede ocupar más espacio con *Más
+opciones → Ancho* (`span: 2 | "full"` en modo JSON): 2 columnas desde 640px o
+el renglón completo. `vc-form` no trae esa opción, así que el build la agrega con
+un parche local (`fieldSpan` en `scripts/build-vc-process.mjs`), sin tocar
+proyecto_x; si el código de `vc-form` cambia y el parche ya no calza, el build
+falla con un mensaje en vez de perder la opción.
+
+Con el nodo de link, en producción envía `$execution.resumeFormUrl` a quien
+capturará desde un nodo anterior (por ejemplo, un *Respond to Webhook* o un
+mensaje de Telegram). En los dos nodos, el POST que aparece en los webhooks es el
+envío que hace la propia página; no hay que llamarlo a mano. En la carpeta
+`custom` los tipos son `CUSTOM.velverProcessFormTrigger` y
+`CUSTOM.velverProcessForm`.
 
 ### 7. Lint Your Code
 

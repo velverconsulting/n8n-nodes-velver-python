@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-velver",
-	"version": "0.1.77",
+	"version": "0.1.78",
 	"description": "Run custom python code without limitations",
 	"license": "MIT",
 	"homepage": "",
@@ -19,11 +19,15 @@
 		"build": "npm version patch --no-git-tag-version && n8n-node build && scp -r ./dist/* root@100.82.138.91:~/n8n-docker/custom/n8n-nodes-velver/ && scp ./py-runner/server.py root@100.82.138.91:~/n8n-docker/py-runner/server.py && ssh root@100.82.138.91 \"docker restart py-runner n8n\"",
 		"deploy": "n8n-node build &&  ssh root@100.82.138.91 \"rm -rf ~/n8n-docker/custom/n8n-nodes-velver/*\" &&  scp -r ./dist/* root@100.82.138.91:~/n8n-docker/custom/n8n-nodes-velver/ && ssh root@100.82.138.91 \"cd ~/n8n-docker && docker compose restart n8n\"",
 		"build:watch": "tsc --watch",
-		"dev": "n8n-node dev",
+		"dev": "n8n-node dev --external-n8n",
 		"lint": "n8n-node lint",
 		"lint:fix": "n8n-node lint --fix",
 		"release": "n8n-node release",
-		"prepublishOnly": "n8n-node prerelease"
+		"prepublishOnly": "n8n-node prerelease",
+		"dev:n8n": "node scripts/dev-n8n.mjs",
+		"dev:bundled": "n8n-node dev",
+		"setup:n8n": "node scripts/setup-n8n.mjs",
+		"build:vc-process": "node scripts/build-vc-process.mjs"
 	},
 	"files": [
 		"dist"
@@ -33,13 +37,17 @@
 		"strict": true,
 		"credentials": [
 			"credentials/VelverApi.credentials.js",
-			"credentials/VelverSqlApi.credentials.js"
+			"credentials/VelverSqlApi.credentials.js",
+			"credentials/VelverFormPrefillApi.credentials.js"
 		],
 		"nodes": [
 			"nodes/VelverPython/VelverPython.node.js",
 			"nodes/VelverGobierno/VelverGobierno.node.js",
 			"nodes/VelverYolo/VelverYolo.node.js",
-			"nodes/VelverLoginTelegram/VelverLoginTelegram.node.js"
+			"nodes/VelverLoginTelegram/VelverLoginTelegram.node.js",
+			"nodes/VelverProcessForm/VelverProcessForm.node.js",
+			"nodes/VelverProcessFormTrigger/VelverProcessFormTrigger.node.js",
+			"nodes/VelverFormPrefill/VelverFormPrefill.node.js"
 		]
 	},
 	"devDependencies": {
@@ -71,5 +79,12 @@
 		"ssh2-promise": "^1.0.3",
 		"tedious": "^19.2.0",
 		"uuid": "^13.0.0"
+	},
+	"engines": {
+		"runtime": {
+			"name": "node",
+			"version": "24.21.0",
+			"onFail": "download"
+		}
 	}
 }
