@@ -474,7 +474,17 @@ export interface UiConfig {
 	data: IDataObject;
 	/** Lo que el servidor impone al recibir (ver `sealedFor` en shared.ts). */
 	sealed: IDataObject;
+	/**
+	 * Claves repetidas a propósito (campos alternos separados por `show_if`):
+	 * clave interna del campo → clave real del dato. vc-form guarda visibilidad,
+	 * errores y opciones POR CLAVE, así que cada variante necesita la suya; al
+	 * enviar se vuelven a juntar en la clave real (ver `collapseAliases`).
+	 */
+	aliases: Record<string, string>;
 }
+
+/** Sufijo de las claves internas de los campos alternos: `user_id__alt2`. */
+export const ALIAS_SEPARATOR = '__alt';
 
 /** Convierte lo capturado en la interfaz al mismo ProcessConfig/FieldConfig del modo JSON. */
 export function configFromUi(ctx: Context): Omit<UiConfig, 'sealed'> {
@@ -488,7 +498,8 @@ export function configFromUi(ctx: Context): Omit<UiConfig, 'sealed'> {
 
 	const fields: FieldConfig[] = [];
 	const data: IDataObject = {};
-	const seen = new Set<string>();
+	const seen = new Map<string, number>();
+	const aliases: Record<string, string> = {};
 	const stages: ProcessStage[] = [];
 
 	for (const [stageIndex, uiStage] of uiStages.entries()) {
@@ -513,17 +524,16 @@ export function configFromUi(ctx: Context): Omit<UiConfig, 'sealed'> {
 
 			for (const f of uiFields) {
 				const extra = { ...(f.extra || {}) };
-				const key = ((extra.key as string) || '').trim() || keyFromLabel(f.label);
+				const dataKey = ((extra.key as string) || '').trim() || keyFromLabel(f.label);
 				delete extra.key;
-				if (!key)
+				if (!dataKey)
 					throw new NodeOperationError(ctx.getNode(), `El campo "${f.label}" necesita una clave`);
-				if (seen.has(key)) {
-					throw new NodeOperationError(
-						ctx.getNode(),
-						`Dos campos usan la clave "${key}"; cambia la clave de uno en "Más opciones"`,
-					);
-				}
-				seen.add(key);
+				// Una clave repetida es un campo ALTERNO: conserva su propia clave interna
+				// y se junta con la real al enviar. Que tenga show_if se valida en readConfig.
+				const occurrence = (seen.get(dataKey) ?? 0) + 1;
+				seen.set(dataKey, occurrence);
+				const key = occurrence === 1 ? dataKey : `${dataKey}${ALIAS_SEPARATOR}${occurrence}`;
+				if (occurrence > 1) aliases[key] = dataKey;
 
 				const field: FieldConfig = { key, label: f.label.trim(), type: f.type || 'text' };
 				if (f.required) field.required = true;
@@ -596,5 +606,5 @@ export function configFromUi(ctx: Context): Omit<UiConfig, 'sealed'> {
 		}
 	}
 
-	return { process: { title: title || stages[0].title, stages }, fields, data };
+	return { process: { title: title || stages[0].title, stages }, fields, data, aliases };
 }
