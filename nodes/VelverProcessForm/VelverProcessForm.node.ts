@@ -49,7 +49,9 @@ export class VelverProcessForm implements INodeType {
 			{
 				name: 'default',
 				httpMethod: 'POST',
-				responseMode: 'onReceived',
+				// Con «Esperar al workflow» la respuesta la manda n8n al TERMINAR la ejecución
+				// (el JSON del último nodo); con «Mostrar mensaje» contesta el nodo al recibir.
+				responseMode: '={{ $parameter["onSubmit"] === "wait" ? "lastNode" : "onReceived" }}',
 				path: '',
 				restartWebhook: true,
 				isFullPath: true,
@@ -65,7 +67,9 @@ export class VelverProcessForm implements INodeType {
 				type: 'notice',
 				default: '',
 			},
-			...formProperties('Valores con los que abre el formulario. Admite expresiones sobre el item de entrada.'),
+			...formProperties(
+				'Valores con los que abre el formulario. Admite expresiones sobre el item de entrada.',
+			),
 		],
 	};
 

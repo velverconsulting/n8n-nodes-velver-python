@@ -46,7 +46,9 @@ export class VelverProcessFormTrigger implements INodeType {
 			{
 				name: 'default',
 				httpMethod: 'POST',
-				responseMode: 'onReceived',
+				// Con «Esperar al workflow» la respuesta la manda n8n al TERMINAR la ejecución
+				// (el JSON del último nodo); con «Mostrar mensaje» contesta el nodo al recibir.
+				responseMode: '={{ $parameter["onSubmit"] === "wait" ? "lastNode" : "onReceived" }}',
 				isFullPath: true,
 				path: FORM_PATH,
 				ndvHideMethod: true,

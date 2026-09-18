@@ -217,6 +217,16 @@ capturado. La transformación a `ProcessConfig`/`FieldConfig[]` ocurre en cada
 ejecución; para ver el resultado, abre la URL de **prueba** con `?json` (en
 producción no existe).
 
+**Campos alternos (misma clave).** Varios campos pueden compartir la clave si
+**todos** tienen *Mostrar Si*, para que aplique uno a la vez (p. ej. un `user_id`
+de texto con `modo = "A"` y otro de lista con `modo = "B"`). Como vc-form guarda
+visibilidad, errores y opciones por clave, cada variante lleva una clave interna
+(`user_id__alt2`); al enviar, la página evalúa los `show_if` y manda una sola
+`user_id` con el valor del campo visible (el servidor hace lo mismo como
+respaldo). Un pre-relleno con esa clave llena todas las variantes. Las
+expresiones de OTROS campos que lean esa clave ven la primera variante, y los
+campos alternos no se imponen como deshabilitados u ocultos.
+
 Lo que la persona no puede editar queda impuesto por el servidor: campos
 deshabilitados u ocultos conservan su valor (por defecto o pre-rellenado) aunque
 la página mande otro, salvo los calculados; los `presets` siempre mandan. Un
@@ -244,6 +254,21 @@ importar Excel y el visor del SAT.
 cambia por `scripts/stubs/vc-tel-countries.ts`, que trae solo ISO-2 + lada
 empaquetados desde `back/src/data/global/rows/paises.json` (~1.2 KB), toma los
 nombres de `Intl.DisplayNames` y deja las banderas a flagcdn (sin emojis).
+
+**Al enviar.** *Mostrar mensaje de término* (por defecto) confirma de inmediato
+y el workflow sigue por su cuenta. *Esperar al workflow (Markdown)* deja la
+página esperando —con el *Mensaje mientras procesa*— y pinta como markdown el
+*Campo del resultado* (`markdown` por defecto) del item que devuelva el último
+nodo; si ese campo viene vacío, muestra el mensaje de término. En ese modo el
+webhook contesta en `lastNode`, así que la respuesta la arma n8n y viaja en
+claro (el envío sí va sellado), y si el workflow falla la página lo dice.
+
+**Texto informativo (Markdown).** El tipo *Texto Informativo (Markdown)* despliega
+su *Contenido* con formato (encabezados, listas, tablas, negritas, ligas) usando
+`<vc-markdown>` de Seemly, que pinta con el markdown compartido de la casa
+(`base/markdown/`: plantillas de Lit, sin `unsafeHTML`; un `<script>` se imprime
+como texto). No es un input: ocupa el renglón completo, no captura dato y su clave
+nunca viaja en el envío. El contenido admite expresiones de n8n.
 
 **Opciones de listas.** En campos de lista desplegable, lista con búsqueda y
 radio, *Opciones como* elige entre capturarlas una por una (*Lista*) o en *JSON*:

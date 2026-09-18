@@ -37,6 +37,7 @@ const FIELD_TYPES = [
 	{ name: 'RFC', value: 'rfc' },
 	{ name: 'Teléfono', value: 'tel' },
 	{ name: 'Texto', value: 'text' },
+	{ name: 'Texto Informativo (Markdown)', value: 'markdown' },
 	{ name: 'Texto Largo', value: 'textarea' },
 	{ name: 'Ubicación (Mapa)', value: 'location' },
 	{ name: 'URL', value: 'url' },
@@ -62,16 +63,29 @@ const FIELD_VALUES: INodeProperties[] = [
 		default: 'text',
 	},
 	{
+		displayName: 'Contenido',
+		name: 'content',
+		type: 'string',
+		typeOptions: { rows: 6 },
+		default: '',
+		placeholder: '## Antes de empezar\n- Ten tu **INE** a la mano\n- Lee el [aviso](https://…)',
+		displayOptions: { show: { type: ['markdown'] } },
+		description:
+			'Texto con formato que se muestra (encabezados, listas, tablas, negritas, ligas). Solo se lee: no es un dato y no viaja en el envío. Admite expresiones.',
+	},
+	{
 		displayName: 'Obligatorio',
 		name: 'required',
 		type: 'boolean',
 		default: false,
+		displayOptions: { hide: { type: ['markdown'] } },
 	},
 	{
 		displayName: 'Deshabilitado',
 		name: 'disabled',
 		type: 'boolean',
 		default: false,
+		displayOptions: { hide: { type: ['markdown'] } },
 		// La interfaz del nodo está en español; la regla pide empezar con «Whether».
 		// eslint-disable-next-line n8n-nodes-base/node-param-description-boolean-without-whether
 		description:
@@ -82,6 +96,7 @@ const FIELD_VALUES: INodeProperties[] = [
 		name: 'hidden',
 		type: 'boolean',
 		default: false,
+		displayOptions: { hide: { type: ['markdown'] } },
 		// La interfaz del nodo está en español; la regla pide empezar con «Whether».
 		// eslint-disable-next-line n8n-nodes-base/node-param-description-boolean-without-whether
 		description:
@@ -92,6 +107,7 @@ const FIELD_VALUES: INodeProperties[] = [
 		name: 'defaultValue',
 		type: 'string',
 		default: '',
+		displayOptions: { hide: { type: ['markdown'] } },
 		description:
 			'Valor con el que abre el campo. Admite expresiones. En casillas usa true/false; en selección múltiple, valores separados por coma.',
 	},
@@ -373,6 +389,7 @@ interface UiField {
 	required?: boolean;
 	disabled?: boolean;
 	hidden?: boolean;
+	content?: string;
 	defaultValue?: IDataObject[string];
 	multiple?: boolean;
 	optionsMode?: 'list' | 'json' | 'jsonata';
@@ -383,7 +400,7 @@ interface UiField {
 	extra?: IDataObject;
 }
 
-type InputOption = { label: string; value: string };
+type InputOption = { label: string; value: string | number | boolean };
 
 /**
  * Las opciones escritas como JSON (o traídas por una expresión), en la forma
@@ -401,17 +418,21 @@ function optionsFromJson(raw: unknown): InputOption[] | null {
 		}
 	}
 	const text = (v: unknown) => (v === undefined || v === null ? '' : String(v));
+	// El valor conserva su TIPO (1 sigue siendo número): las expresiones JSONata que
+	// lo comparan (`grupo = $$.secretaria`) no igualan 1 con "1".
+	const scalar = (v: unknown): InputOption['value'] | undefined =>
+		typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? v : undefined;
 	if (Array.isArray(value)) {
 		const out: InputOption[] = [];
 		for (const item of value) {
 			if (item && typeof item === 'object') {
 				const o = item as IDataObject;
 				const label = text(o.label ?? o.name ?? o.text ?? o.value);
-				const val = text(o.value ?? o.id ?? label);
-				if (!label && !val) return null;
-				out.push({ label: label || val, value: val || label });
+				const val = scalar(o.value) ?? scalar(o.id) ?? label;
+				if (!label && text(val) === '') return null;
+				out.push({ label: label || text(val), value: text(val) === '' ? label : val });
 			} else if (typeof item === 'string' || typeof item === 'number') {
-				out.push({ label: String(item), value: String(item) });
+				out.push({ label: String(item), value: item });
 			} else {
 				return null;
 			}
@@ -536,6 +557,10 @@ export function configFromUi(ctx: Context): Omit<UiConfig, 'sealed'> {
 				if (occurrence > 1) aliases[key] = dataKey;
 
 				const field: FieldConfig = { key, label: f.label.trim(), type: f.type || 'text' };
+				if (field.type === 'markdown') {
+					// Solo información: su contenido y nada de valores, reglas de captura ni sellos.
+					field.content = f.content || '';
+				}
 				if (f.required) field.required = true;
 				if (WITH_OPTIONS.includes(field.type as string)) {
 					if (f.optionsMode === 'json') {

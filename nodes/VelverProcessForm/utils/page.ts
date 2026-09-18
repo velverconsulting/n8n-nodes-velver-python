@@ -16,6 +16,12 @@ export interface ProcessPageConfig {
 	process: Record<string, unknown>;
 	fields: unknown[];
 	data: Record<string, unknown>;
+	/** Claves internas de campos alternos → clave real (ver UiConfig.aliases). */
+	aliases: Record<string, string>;
+	/** 'submit': confirma al recibir. 'wait': espera al workflow y pinta su markdown. */
+	onSubmit: 'submit' | 'wait';
+	resultField: string;
+	waitingMessage: string;
 }
 
 const TEXT = {
@@ -142,6 +148,8 @@ const call = async (payload, retried = false) => {
 	}
 	if (!response.ok) throw new Error('HTTP ' + response.status);
 	const body = await response.json();
+	// Esperando al workflow, n8n contesta con el JSON del último nodo, sin sobre.
+	if (!body || typeof body.content !== 'string') return body;
 	return JSON.parse(await agent.openText(body.content, sess));
 };
 
@@ -189,6 +197,14 @@ const showNotice = (title, message) => {
 	main.querySelector('p').textContent = message;
 };
 
+/** El markdown que devolvió el workflow, con el mismo componente del formulario. */
+const showMarkdown = (markdown) => {
+	main.innerHTML = '<section class="notice"></section>';
+	const md = document.createElement('vc-markdown');
+	md.content = markdown;
+	main.querySelector('.notice').appendChild(md);
+};
+
 document.title = cfg.pageTitle;
 // Idioma y tema antes de crear el elemento: los componentes los leen al construirse.
 VPF.configure({ lang: cfg.language, theme: cfg.theme });
@@ -196,17 +212,57 @@ VPF.configure({ lang: cfg.language, theme: cfg.theme });
 const showLinkError = (kind) =>
 	showNotice(kind === 'expired' ? text.linkExpired : text.linkInvalid, text.linkHelp);
 
+// Campos alternos (misma clave, distinto show_if): vc-form los lleva con claves
+// internas y aquí se juntan en la clave real con el valor del que está VISIBLE,
+// evaluando show_if con el mismo JSONata y la misma regla (solo false oculta).
+const collapseAliases = async (data) => {
+	const aliases = cfg.aliases || {};
+	const groups = {};
+	for (const [internal, dataKey] of Object.entries(aliases)) {
+		(groups[dataKey] = groups[dataKey] || [dataKey]).push(internal);
+	}
+	const out = { ...data };
+	for (const [dataKey, members] of Object.entries(groups)) {
+		const visible = [];
+		for (const member of members) {
+			const field = cfg.fields.find((f) => f.key === member);
+			let shown = true;
+			try {
+				shown = !field?.show_if || (await VPF.jsonata(field.show_if).evaluate(data)) !== false;
+			} catch (error) {
+				console.error('[velver-process-form] show_if de ' + member, error);
+			}
+			if (shown) visible.push(member);
+		}
+		const filled = visible.find((m) => out[m] !== undefined && out[m] !== null && out[m] !== '');
+		const value = filled === undefined ? undefined : out[filled];
+		for (const m of members) delete out[m];
+		if (value !== undefined) out[dataKey] = value;
+	}
+	return out;
+};
+
 let sending = false;
 const submit = async (event) => {
 	if (sending) return;
 	sending = true;
 	showStatus(text.sending);
 	try {
-		const data = await serialize(event.detail?.data || {});
+		if (cfg.onSubmit === 'wait') showStatus(cfg.waitingMessage);
+		const data = await serialize(await collapseAliases(event.detail?.data || {}));
 		const result = await call({ action: 'submit', data });
 		if (result?.linkError) {
 			showStatus('');
 			showLinkError(result.linkError);
+			return;
+		}
+		// Esperando al workflow, la respuesta es el JSON del último nodo (en claro):
+		// su campo de resultado se pinta como markdown.
+		if (cfg.onSubmit === 'wait') {
+			const markdown = result?.[cfg.resultField];
+			showStatus('');
+			if (typeof markdown === 'string' && markdown.trim()) showMarkdown(markdown);
+			else showNotice(cfg.completionTitle, cfg.completionMessage);
 			return;
 		}
 		if (!result?.ok) throw new Error('rechazado');

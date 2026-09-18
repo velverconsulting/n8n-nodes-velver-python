@@ -1,6 +1,6 @@
 {
 	"name": "n8n-nodes-velver",
-	"version": "0.1.78",
+	"version": "0.1.85",
 	"description": "Run custom python code without limitations",
 	"license": "MIT",
 	"homepage": "",

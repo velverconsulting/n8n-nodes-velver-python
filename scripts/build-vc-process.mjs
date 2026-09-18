@@ -54,8 +54,12 @@ fs.writeFileSync(
 		// radios extendidos, blur). La app lo enlaza en index.html; aqui la pagina lo
 		// inyecta en <head>, porque dentro del shadow DOM `:root` no aplica.
 		"import globalStyles from '@tw';",
+		// jsonata ya viaja en el bundle (vc-form la usa); la pagina la necesita para
+		// decidir que campo alterno esta visible al enviar.
+		"import jsonata from 'jsonata';",
 		'(globalThis as any).VelverProcessForm = {',
 		'  globalStyles,',
+		'  jsonata,',
 		'  configure(cfg: Parameters<typeof setGlobalConfig>[0]) {',
 		'    setGlobalConfig(cfg);',
 		'    applyTheme(activeConfig as any);',
@@ -179,6 +183,9 @@ const OPTIONS_JSONATA_HELPER = `
 /* Parche del build de n8n (scripts/build-vc-process.mjs): opciones con JSONata. */
 function vcNormalizeOptions(result: unknown): InputOption[] {
   const text = (v: unknown) => (v === undefined || v === null ? '' : String(v));
+  // El valor conserva su TIPO (1 sigue siendo numero): otra expresion que lo compare
+  // (grupo = $$.campo) no iguala 1 con "1".
+  const scalar = (v: unknown): any => (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' ? v : undefined);
   const list = result === undefined || result === null ? [] : Array.isArray(result) ? result : [result];
   if (list.length === 1 && list[0] && typeof list[0] === 'object' && !Array.isArray(list[0]) && !('label' in (list[0] as any)) && !('value' in (list[0] as any))) {
     return Object.entries(list[0] as Record<string, unknown>).map(([value, label]) => ({ label: text(label), value }));
@@ -188,10 +195,10 @@ function vcNormalizeOptions(result: unknown): InputOption[] {
     if (item && typeof item === 'object') {
       const o = item as any;
       const label = text(o.label ?? o.name ?? o.text ?? o.value);
-      const value = text(o.value ?? o.id ?? label);
-      if (label || value) out.push({ label: label || value, value: value || label });
+      const value = scalar(o.value) ?? scalar(o.id) ?? label;
+      if (label || text(value)) out.push({ label: label || text(value), value: text(value) === '' ? label : value } as InputOption);
     } else if (typeof item === 'string' || typeof item === 'number') {
-      out.push({ label: String(item), value: String(item) });
+      out.push({ label: String(item), value: item } as InputOption);
     }
   }
   return out;
@@ -302,6 +309,9 @@ try {
 					find: /^(\.\/|.*input-components\/)vc-ine$/,
 					replacement: path.join(frontDir, 'src', 'mobile-stubs', 'vc-ine.ts'),
 				},
+				// La entrada vive en una carpeta temporal fuera del front: desde ahi `jsonata`
+				// no se resuelve. Se apunta al paquete del front, el MISMO que usa vc-form.
+				{ find: /^jsonata$/, replacement: path.join(frontDir, 'node_modules', 'jsonata') },
 			],
 		},
 		build: {
@@ -320,6 +330,9 @@ const js = fs.readFileSync(path.join(tmpDir, 'out', 'vc-process.js'), 'utf8');
 let commit = '';
 try {
 	commit = execFileSync('git', ['-C', frontDir, 'rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim();
+	// Si el front tiene cambios sin commit, el bundle no es ese commit: se dice.
+	const dirty = execFileSync('git', ['-C', frontDir, 'status', '--porcelain', '--', '.'], { encoding: 'utf8' }).trim();
+	if (dirty) commit += '+cambios-sin-commit';
 } catch {
 	/* sin git: el bundle queda sin commit de origen */
 }

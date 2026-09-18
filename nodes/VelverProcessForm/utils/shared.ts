@@ -74,6 +74,40 @@ export const formProperties = (initialDataDescription: string): INodeProperties[
 		description:
 			'Campos por renglón en cada sección. En celulares siempre se apilan en una columna.',
 	},
+	{
+		displayName: 'Al Enviar',
+		name: 'onSubmit',
+		type: 'options',
+		options: [
+			{
+				name: 'Mostrar Mensaje De Término',
+				value: 'submit',
+				description: 'La página confirma de inmediato; el workflow sigue por su cuenta',
+			},
+			{
+				name: 'Esperar Al Workflow (Markdown)',
+				value: 'wait',
+				description: 'La página espera a que termine y muestra lo que devuelva el último nodo',
+			},
+		],
+		default: 'submit',
+	},
+	{
+		displayName: 'Campo Del Resultado',
+		name: 'resultField',
+		type: 'string',
+		default: 'markdown',
+		displayOptions: { show: { onSubmit: ['wait'] } },
+		description:
+			'Propiedad del item del último nodo con el texto (markdown) que verá la persona. Sin ella, se muestra el mensaje de término.',
+	},
+	{
+		displayName: 'Mensaje Mientras Procesa',
+		name: 'waitingMessage',
+		type: 'string',
+		default: 'Procesando tu solicitud…',
+		displayOptions: { show: { onSubmit: ['wait'] } },
+	},
 	...uiConfigProperties,
 	{
 		displayName: 'JSON Avanzado',
@@ -190,13 +224,41 @@ export function sealedFor(
 	fields: FieldConfig[],
 	data: IDataObject,
 	process: ProcessConfig,
+	aliases: Record<string, string> = {},
 ): IDataObject {
+	// Las claves con campos alternos no se imponen: cuál variante vale depende de
+	// qué show_if se cumpla en la página.
+	const aliased = new Set([...Object.keys(aliases), ...Object.values(aliases)]);
 	const sealed: IDataObject = {};
 	for (const field of fields) {
+		if (aliased.has(field.key) || field.type === 'markdown') continue;
 		if ((field.disabled || field.hideInForm) && !field.calculation)
 			sealed[field.key] = data[field.key];
 	}
 	return Object.assign(sealed, process.presets || {});
+}
+
+/**
+ * Junta los campos alternos en su clave real. La página ya manda la clave real
+ * con el valor del campo visible; esto es el respaldo para un envío que traiga
+ * las claves internas: gana el primer valor no vacío.
+ */
+export function collapseAliases(
+	submitted: IDataObject,
+	aliases: Record<string, string>,
+): IDataObject {
+	const out = { ...submitted };
+	const groups = new Map<string, string[]>();
+	for (const [internal, dataKey] of Object.entries(aliases)) {
+		groups.set(dataKey, [...(groups.get(dataKey) || [dataKey]), internal]);
+	}
+	for (const [dataKey, members] of groups) {
+		const filled = members.find((m) => out[m] !== undefined && out[m] !== null && out[m] !== '');
+		const value = filled === undefined ? out[dataKey] : out[filled];
+		for (const m of members) delete out[m];
+		if (value !== undefined) out[dataKey] = value;
+	}
+	return out;
 }
 
 /**
@@ -225,7 +287,7 @@ export function readConfig(ctx: Context): UiConfig {
 	if (hasUiStages) {
 		base = configFromUi(ctx);
 	} else if (Array.isArray(processJson.stages) && processJson.stages.length) {
-		base = { process: { stages: [] }, fields: [], data: {} };
+		base = { process: { stages: [] }, fields: [], data: {}, aliases: {} };
 	} else {
 		throw new NodeOperationError(
 			ctx.getNode(),
@@ -275,8 +337,27 @@ export function readConfig(ctx: Context): UiConfig {
 	// Un campo oculto no puede exigirse: nadie lo ve para llenarlo.
 	for (const field of fields) if (field.hideInForm) delete field.required;
 
+	// Una clave repetida solo tiene sentido si show_if decide cuál campo aplica.
+	const { aliases } = base;
+	for (const dataKey of new Set(Object.values(aliases))) {
+		const members = fields.filter((f) => f.key === dataKey || aliases[f.key] === dataKey);
+		const withoutRule = members.filter((f) => !String(f.show_if || '').trim());
+		if (withoutRule.length) {
+			throw new NodeOperationError(
+				ctx.getNode(),
+				`${members.length} campos usan la clave "${dataKey}". Es válido solo si todos tienen "Mostrar Si" para que aplique uno a la vez; falta en: ${withoutRule.map((f) => f.label || f.key).join(', ')}`,
+			);
+		}
+	}
+
 	const data = { ...base.data, ...dataJson };
-	const config: UiConfig = { process, fields, data, sealed: sealedFor(fields, data, process) };
+	const config: UiConfig = {
+		process,
+		fields,
+		data,
+		aliases,
+		sealed: sealedFor(fields, data, process, aliases),
+	};
 
 	const known = new Set(config.fields.map((f) => f.key));
 	const missing = config.process.stages
@@ -310,18 +391,25 @@ async function readConfigWithPrefill(ctx: IWebhookFunctions): Promise<PrefilledC
 	const opened = openPrefill(secret, token);
 	if (!opened.ok) return { ...config, linkError: opened.reason };
 
-	const byKey = new Map(config.fields.map((f) => [f.key, f]));
 	const data = { ...config.data };
 	for (const [key, raw] of Object.entries(opened.data)) {
-		const field = byKey.get(key);
-		if (field) data[key] = coerceForField(field, raw);
+		// La clave del token llena el campo y todos sus alternos.
+		for (const field of config.fields) {
+			if (field.key === key || config.aliases[field.key] === key) {
+				data[field.key] = coerceForField(field, raw);
+			}
+		}
 	}
 	// Deshabilitados y ocultos quedan impuestos con el valor del token; los presets mandan.
-	return { ...config, data, sealed: sealedFor(config.fields, data, config.process) };
+	return {
+		...config,
+		data,
+		sealed: sealedFor(config.fields, data, config.process, config.aliases),
+	};
 }
 
 async function pageConfig(ctx: IWebhookFunctions): Promise<ProcessPageConfig> {
-	const { process, fields, data, linkError } = await readConfigWithPrefill(ctx);
+	const { process, fields, data, aliases, linkError } = await readConfigWithPrefill(ctx);
 	const options = param<IDataObject>(ctx, 'options', {});
 	return {
 		linkError,
@@ -332,9 +420,13 @@ async function pageConfig(ctx: IWebhookFunctions): Promise<ProcessPageConfig> {
 		completionTitle: (options.completionTitle as string) ?? '¡Listo!',
 		completionMessage:
 			(options.completionMessage as string) ?? 'Tu información se envió correctamente.',
+		onSubmit: param<string>(ctx, 'onSubmit', 'submit') === 'wait' ? 'wait' : 'submit',
+		resultField: param<string>(ctx, 'resultField', 'markdown') || 'markdown',
+		waitingMessage: param<string>(ctx, 'waitingMessage', 'Procesando tu solicitud…'),
 		process,
 		fields,
 		data,
+		aliases,
 	};
 }
 
@@ -443,7 +535,7 @@ export async function handleFormWebhook(ctx: IWebhookFunctions): Promise<IWebhoo
 	}
 
 	if (request.action === 'submit' && isPlainObject(request.data)) {
-		const { sealed, linkError } = await readConfigWithPrefill(ctx);
+		const { sealed, aliases, fields, linkError } = await readConfigWithPrefill(ctx);
 		if (linkError) {
 			res
 				.status(200)
@@ -451,7 +543,18 @@ export async function handleFormWebhook(ctx: IWebhookFunctions): Promise<IWebhoo
 				.json(opened.sealResponse({ ok: false, linkError }));
 			return { noWebhookResponse: true };
 		}
-		const item = await itemFromSubmission(ctx, request.data, sealed);
+		// Los bloques de información (type 'markdown') no son datos: no viajan.
+		const submitted = collapseAliases(request.data, aliases);
+		for (const field of fields) if (field.type === 'markdown') delete submitted[field.key];
+		const item = await itemFromSubmission(ctx, submitted, sealed);
+
+		// «Esperar al workflow»: no se contesta aquí — n8n responde al TERMINAR con el
+		// JSON del último nodo (responseMode `lastNode`), que es lo que la página pinta.
+		// Esa respuesta la arma n8n, así que va en claro; el envío sí viajó sellado.
+		if (param<string>(ctx, 'onSubmit', 'submit') === 'wait') {
+			return { workflowData: [[item]] };
+		}
+
 		// La respuesta sellada se manda aquí mismo: n8n no respeta `webhookResponse`
 		// en un trigger (contesta con su propio cuerpo), y la página necesita abrirla.
 		res
