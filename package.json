@@ -40,7 +40,8 @@
 		"credentials": [
 			"credentials/VelverApi.credentials.js",
 			"credentials/VelverSqlApi.credentials.js",
-			"credentials/VelverFormPrefillApi.credentials.js"
+			"credentials/VelverFormPrefillApi.credentials.js",
+			"credentials/VelverSignApi.credentials.js"
 		],
 		"nodes": [
 			"nodes/VelverPython/VelverPython.node.js",
@@ -50,7 +51,8 @@
 			"nodes/VelverProcessForm/VelverProcessForm.node.js",
 			"nodes/VelverProcessFormTrigger/VelverProcessFormTrigger.node.js",
 			"nodes/VelverFormPrefill/VelverFormPrefill.node.js",
-			"nodes/VelverDocument/VelverDocument.node.js"
+			"nodes/VelverDocument/VelverDocument.node.js",
+			"nodes/VelverSign/VelverSign.node.js"
 		]
 	},
 	"devDependencies": {

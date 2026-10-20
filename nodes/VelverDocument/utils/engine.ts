@@ -78,17 +78,36 @@ async function loadEngine(): Promise<DocxEngine> {
 	// Un solo renderer para todo el proceso: carga motor y metricas una vez.
 	const renderer = pdf.createRenderer({ metricsDir: join(dir, 'viewer', 'assets') });
 
+	// El motor solo reconoce chips (content controls). Una plantilla con texto plano
+	// {{variable}} se convierte a chips en cuerpo, encabezados, pies y notas.
+	const CHROME_RE = /^word\/(header|footer|footnotes|endnotes)\d*\.xml$/;
+	function normalize(template: Uint8Array): Uint8Array {
+		const pkg = new editor.DocxPackage(template);
+		let converted = editor.importBraces(editor.mainDocument(pkg)) as number;
+		for (const path of pkg.partPaths() as string[]) {
+			if (!CHROME_RE.test(path)) continue;
+			const d = pkg.loadXml(path);
+			if (d) converted += editor.importBraces(d) as number;
+		}
+		return converted > 0 ? (pkg.serialize() as Uint8Array) : template;
+	}
+
 	return {
 		async merge(template, values, blank) {
-			return await editor.buildFinalDocx(template, values, undefined, undefined, {
+			return await editor.buildFinalDocx(normalize(template), values, undefined, undefined, {
 				unfilled: blank ? 'blank' : 'keep',
 			});
 		},
 		async listChips(template) {
-			const pkg = new editor.DocxPackage(template);
-			const doc = editor.mainDocument(pkg);
+			const pkg = new editor.DocxPackage(normalize(template));
+			const docs = [editor.mainDocument(pkg)];
+			for (const path of pkg.partPaths() as string[]) {
+				if (!CHROME_RE.test(path)) continue;
+				const d = pkg.loadXml(path);
+				if (d) docs.push(d);
+			}
 			const seen = new Map<string, ChipDescriptor>();
-			for (const chip of editor.allChips(doc)) {
+			for (const chip of docs.flatMap((d) => editor.allChips(d))) {
 				if (seen.has(chip.name)) continue;
 				seen.set(chip.name, {
 					name: chip.name,
