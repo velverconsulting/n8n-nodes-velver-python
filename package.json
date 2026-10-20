@@ -16,8 +16,8 @@
 		"url": "https://github.com/velverconsulting/n8n-nodes-velver-python.git"
 	},
 	"scripts": {
-		"build": "npm version patch --no-git-tag-version && n8n-node build && scp -r ./dist/* root@100.82.138.91:~/n8n-docker/custom/n8n-nodes-velver/ && scp ./py-runner/server.py root@100.82.138.91:~/n8n-docker/py-runner/server.py && ssh root@100.82.138.91 \"docker restart py-runner n8n\"",
-		"deploy": "n8n-node build &&  ssh root@100.82.138.91 \"rm -rf ~/n8n-docker/custom/n8n-nodes-velver/*\" &&  scp -r ./dist/* root@100.82.138.91:~/n8n-docker/custom/n8n-nodes-velver/ && ssh root@100.82.138.91 \"cd ~/n8n-docker && docker compose restart n8n\"",
+		"build": "npm version patch --no-git-tag-version && n8n-node build && node scripts/vendor-docx.mjs --dist && scp -r ./dist/* root@100.82.138.91:~/n8n-docker/custom/n8n-nodes-velver/ && scp ./py-runner/server.py root@100.82.138.91:~/n8n-docker/py-runner/server.py && ssh root@100.82.138.91 \"docker restart py-runner n8n\"",
+		"deploy": "n8n-node build && node scripts/vendor-docx.mjs --dist && ssh root@100.82.138.91 \"rm -rf ~/n8n-docker/custom/n8n-nodes-velver/*\" &&  scp -r ./dist/* root@100.82.138.91:~/n8n-docker/custom/n8n-nodes-velver/ && ssh root@100.82.138.91 \"cd ~/n8n-docker && docker compose restart n8n\"",
 		"build:watch": "tsc --watch",
 		"dev": "n8n-node dev --external-n8n",
 		"lint": "n8n-node lint",
@@ -27,10 +27,12 @@
 		"dev:n8n": "node scripts/dev-n8n.mjs",
 		"dev:bundled": "n8n-node dev",
 		"setup:n8n": "node scripts/setup-n8n.mjs",
-		"build:vc-process": "node scripts/build-vc-process.mjs"
+		"build:vc-process": "node scripts/build-vc-process.mjs",
+		"vendor:docx": "node scripts/vendor-docx.mjs"
 	},
 	"files": [
-		"dist"
+		"dist",
+		"vendor"
 	],
 	"n8n": {
 		"n8nNodesApiVersion": 1,
@@ -47,7 +49,8 @@
 			"nodes/VelverLoginTelegram/VelverLoginTelegram.node.js",
 			"nodes/VelverProcessForm/VelverProcessForm.node.js",
 			"nodes/VelverProcessFormTrigger/VelverProcessFormTrigger.node.js",
-			"nodes/VelverFormPrefill/VelverFormPrefill.node.js"
+			"nodes/VelverFormPrefill/VelverFormPrefill.node.js",
+			"nodes/VelverDocument/VelverDocument.node.js"
 		]
 	},
 	"devDependencies": {
@@ -58,6 +61,7 @@
 		"@vercel/ncc": "^0.38.4",
 		"eslint": "^9.39.1",
 		"eslint-import-resolver-typescript": "^4.4.4",
+		"n8n-workflow": "1.120.29",
 		"prettier": "3.6.2",
 		"release-it": "^19.0.4",
 		"typescript": "5.9.2"
@@ -66,13 +70,19 @@
 		"n8n-workflow": "^1.17.0"
 	},
 	"dependencies": {
+		"@napi-rs/canvas": "^1.0.12",
+		"@pdf-lib/fontkit": "^1.1.1",
+		"@xmldom/xmldom": "^0.9.12",
 		"axios": "^1.13.2",
 		"fast-xml-parser": "^5.3.1",
+		"fflate": "^0.8.3",
 		"file-type": "^16.5.3",
 		"form-data": "^4.0.5",
+		"jsonata": "^2.2.2",
 		"jsonwebtoken": "^9.0.3",
 		"mariadb": "^3.4.5",
 		"mysql2": "^3.16.1",
+		"pdf-lib": "^1.17.1",
 		"pg": "^8.17.2",
 		"pg-hstore": "^2.3.4",
 		"sequelize": "^6.37.7",
