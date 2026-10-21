@@ -21,7 +21,8 @@ RUN pip install --no-cache-dir \
     opencv-python-headless \
     pandas \
     onnxruntime \
-    pillow
+    pillow \
+    pypdfium2
 
 WORKDIR /app
 COPY server.py /app/server.py

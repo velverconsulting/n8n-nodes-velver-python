@@ -13,7 +13,7 @@ from collections import OrderedDict
 from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager, redirect_stdout
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, File, Form, UploadFile
 from pydantic import BaseModel
 from ultralytics import YOLO
 
@@ -179,6 +179,74 @@ async def run_yolo(req: YoloReq):
         traceback.print_exc()
         print("-" * 30)
         return {"success": False, "error": str(e)}
+
+# --- Endpoint: PDF/imagen a fotos JPEG ---
+# Convierte cada página de un PDF (o una imagen) en un JPEG listo para mandarse como foto
+# de Telegram, para que se vea sin descargar el archivo. Telegram acepta fotos de hasta
+# 10 MB con ancho + alto <= 10000 px; aquí se limita el ancho y se recomprime si pesa mucho.
+MAX_LADO_FOTO = 2560
+MAX_BYTES_FOTO = 9 * 1024 * 1024
+
+def _a_jpeg(img, quality: int) -> bytes:
+    from PIL import Image
+    if img.mode != "RGB":
+        fondo = Image.new("RGB", img.size, (255, 255, 255))
+        fondo.paste(img, mask=img.split()[-1] if img.mode in ("RGBA", "LA") else None)
+        img = fondo
+    if max(img.size) > MAX_LADO_FOTO:
+        img.thumbnail((MAX_LADO_FOTO, MAX_LADO_FOTO))
+    q = quality
+    while True:
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=q, optimize=True)
+        if buf.tell() <= MAX_BYTES_FOTO or q <= 40:
+            return buf.getvalue()
+        q -= 15
+
+def _render_pages(data: bytes, width: int, max_pages: int, quality: int) -> Dict[str, Any]:
+    from PIL import Image
+    paginas = []
+    if data[:5] == b"%PDF-":
+        import pypdfium2 as pdfium
+        pdf = pdfium.PdfDocument(data)
+        try:
+            total = len(pdf)
+            for i in range(min(total, max_pages)):
+                page = pdf[i]
+                escala = width / page.get_width()
+                img = page.render(scale=escala).to_pil()
+                jpg = _a_jpeg(img, quality)
+                paginas.append({"page": i + 1, "width": img.width, "height": img.height,
+                                "bytes": len(jpg), "b64": base64.b64encode(jpg).decode()})
+                page.close()
+        finally:
+            pdf.close()
+    else:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        total = 1
+        jpg = _a_jpeg(img, quality)
+        paginas.append({"page": 1, "width": img.width, "height": img.height,
+                        "bytes": len(jpg), "b64": base64.b64encode(jpg).decode()})
+    return {"success": True, "total_pages": total, "truncated": total > len(paginas), "pages": paginas}
+
+@app.post("/render-pages")
+async def render_pages(
+    file: UploadFile = File(...),
+    width: int = Form(1700),
+    max_pages: int = Form(10),
+    quality: int = Form(85),
+):
+    try:
+        data = await file.read()
+        width = max(400, min(width, MAX_LADO_FOTO))
+        max_pages = max(1, min(max_pages, 50))
+        quality = max(40, min(quality, 95))
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _render_pages, data, width, max_pages, quality)
+    except Exception as e:
+        traceback.print_exc()
+        return {"success": False, "error": str(e), "pages": []}
 
 # --- Endpoint: Python Ejecutor Generico ---
 @app.post("/run")
