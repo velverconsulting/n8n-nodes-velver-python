@@ -36,7 +36,7 @@ export interface DocxEngine {
 	/** Chips (variables) del cuerpo de la plantilla, sin repetir nombres. */
 	listChips(template: Uint8Array): Promise<ChipDescriptor[]>;
 	/** DOCX ya relleno -> PDF. */
-	renderPdf(docx: Uint8Array): Promise<RenderResult>;
+	renderPdf(docx: Uint8Array, opts?: { removeHighlights?: boolean }): Promise<RenderResult>;
 }
 
 /** Carpeta vendor/docx: junto a dist/ (paquete publicado) o dentro (deploy por scp de dist/*). */
@@ -92,6 +92,29 @@ async function loadEngine(): Promise<DocxEngine> {
 		return converted > 0 ? (pkg.serialize() as Uint8Array) : template;
 	}
 
+	// Quita resaltados (w:highlight y sombreado de run) solo para el PDF; el DOCX no cambia.
+	const HL_RE = /^word\/(document|header\d*|footer\d*|footnotes|endnotes)\.xml$/;
+	function stripHighlights(docx: Uint8Array): Uint8Array {
+		const pkg = new editor.DocxPackage(docx);
+		let removed = 0;
+		for (const path of pkg.partPaths() as string[]) {
+			if (!HL_RE.test(path)) continue;
+			const d = pkg.loadXml(path);
+			if (!d) continue;
+			const rprs = d.getElementsByTagName('w:rPr');
+			for (let i = 0; i < rprs.length; i++) {
+				const kids = Array.from(rprs[i].childNodes as ArrayLike<{ nodeName: string }>);
+				for (const k of kids) {
+					if (k.nodeName === 'w:highlight' || k.nodeName === 'w:shd') {
+						rprs[i].removeChild(k as never);
+						removed++;
+					}
+				}
+			}
+		}
+		return removed > 0 ? (pkg.serialize() as Uint8Array) : docx;
+	}
+
 	return {
 		async merge(template, values, blank) {
 			return await editor.buildFinalDocx(normalize(template), values, undefined, undefined, {
@@ -122,7 +145,8 @@ async function loadEngine(): Promise<DocxEngine> {
 			}
 			return [...seen.values()];
 		},
-		async renderPdf(docx) {
+		async renderPdf(docx, opts) {
+			if (opts?.removeHighlights) docx = stripHighlights(docx);
 			return await renderer.render(docx, {});
 		},
 	};

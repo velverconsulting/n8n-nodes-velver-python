@@ -160,6 +160,13 @@ export class VelverDocument implements INodeType {
 						description: 'Sin extensión. Por omisión, el nombre de la plantilla',
 					},
 					{
+						displayName: 'Quitar Resaltados Del PDF',
+						name: 'removeHighlights',
+						type: 'boolean',
+						default: false,
+						description: 'Whether to remove text highlights and run shading from the PDF (the DOCX keeps them)',
+					},
+					{
 						displayName: 'Propiedad Binaria Del DOCX',
 						name: 'binaryPropertyDocx',
 						type: 'string',
@@ -257,7 +264,7 @@ export class VelverDocument implements INodeType {
 				const binary: Record<string, IBinaryData> = {};
 
 				if (format === 'pdf' || format === 'both') {
-					const result = await engine.renderPdf(docx);
+					const result = await engine.renderPdf(docx, { removeHighlights: options.removeHighlights === true });
 					json.pages = result.pages;
 					json.sha256 = result.sha256;
 					binary[pdfProp] = await this.helpers.prepareBinaryData(
