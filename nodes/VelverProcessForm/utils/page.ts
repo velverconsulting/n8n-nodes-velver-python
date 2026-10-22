@@ -326,9 +326,34 @@ if (cfg.linkError) {
 	el.columns = cfg.columns;
 	// Los presets se SELLAN: el registro nace con ellos y ninguna sección los pregunta.
 	el.data = { ...cfg.data, ...(cfg.process.presets || {}) };
-	el.addEventListener('save', submit);
+	// Cada sección es un <vc-form> que emite su propio 'save' (bubbles + composed)
+	// cuando se aprieta Enter con sus campos llenos: <vc-process> lo usa para pasar
+	// al siguiente paso, pero el evento sigue subiendo y llegaba aquí como si fuera
+	// el envío final, con solo los datos de esa sección. El 'save' del proceso es el
+	// único que se despacha en el propio <vc-process>.
+	el.addEventListener('save', (event) => {
+		if (event.composedPath()[0] !== el) return;
+		submit(event);
+	});
 	main.appendChild(el);
 }
+
+// Tab en una lista con búsqueda (vc-select) solo cerraba la lista: si el filtro
+// dejó UNA opción, se elige al salir, como hacen los combobox nativos. Va en
+// captura para correr antes que el manejador del propio vc-select (que cierra y
+// borra la búsqueda); el Tab sigue su curso normal hacia el siguiente campo.
+window.addEventListener(
+	'keydown',
+	(event) => {
+		if (event.key !== 'Tab') return;
+		const select = event.composedPath().find((node) => node.tagName === 'VC-SELECT');
+		if (!select || !select._isOpen || select.config?.multiple) return;
+		if (!String(select._searchTerm || '').trim()) return;
+		const options = typeof select._getFilteredOptions === 'function' ? select._getFilteredOptions() : [];
+		if (options.length === 1) select._handleSelect(options[0]);
+	},
+	true,
+);
 </script>
 </body>
 </html>`;
