@@ -512,7 +512,12 @@ export async function handleFormWebhook(ctx: IWebhookFunctions): Promise<IWebhoo
 	}
 
 	const reject = (): IWebhookResponseData => {
-		res.status(400).set({ 'x-vc-env': 'renew' }).json({ error: 'solicitud no válida' });
+		// El formulario corre en un origen opaco (sandbox de n8n): sus fetch son
+		// cross-origin y la página solo puede leer esta cabecera si se expone.
+		res
+			.status(400)
+			.set({ 'x-vc-env': 'renew', 'Access-Control-Expose-Headers': 'x-vc-env' })
+			.json({ error: 'solicitud no válida' });
 		return { noWebhookResponse: true };
 	};
 

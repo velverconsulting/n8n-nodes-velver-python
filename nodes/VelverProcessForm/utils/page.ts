@@ -87,6 +87,46 @@ const baseStyles = `
 `;
 
 /**
+ * n8n sirve los formularios con `Content-Security-Policy: sandbox …` SIN
+ * `allow-same-origin` (N8N_INSECURE_DISABLE_FORM_HTML_SANDBOX apagado): la página
+ * queda en un origen opaco y leer `localStorage`, `sessionStorage` o
+ * `document.cookie` lanza SecurityError. vc-root lee la sesión de localStorage al
+ * construirse, así que sin esto el formulario no llega a pintarse. Se sustituyen
+ * por versiones en memoria SOLO si el acceso real falla; el formulario no
+ * necesita que nada persista entre cargas. Va en un <script> clásico antes del
+ * bundle para que exista cuando se definen los componentes.
+ */
+const sandboxShim = `(() => {
+	for (const name of ['localStorage', 'sessionStorage']) {
+		try {
+			window[name].getItem('__vc');
+			continue;
+		} catch {}
+		const map = new Map();
+		const store = {
+			get length() { return map.size; },
+			key: (i) => [...map.keys()][i] ?? null,
+			getItem: (k) => (map.has(String(k)) ? map.get(String(k)) : null),
+			setItem: (k, v) => { map.set(String(k), String(v)); },
+			removeItem: (k) => { map.delete(String(k)); },
+			clear: () => map.clear(),
+		};
+		try { Object.defineProperty(window, name, { value: store, configurable: true }); } catch {}
+	}
+	try {
+		void document.cookie;
+	} catch {
+		try {
+			Object.defineProperty(document, 'cookie', {
+				configurable: true,
+				get: () => '',
+				set: () => {},
+			});
+		} catch {}
+	}
+})();`;
+
+/**
  * La página NO trae la configuración: solo el bundle. Al cargar pide el
  * challenge, recibe la configuración sellada con el sobre v2 y envía el registro
  * sellado igual — nada del proceso ni de lo capturado viaja como JSON legible.
@@ -105,6 +145,7 @@ export function renderProcessPage(language: PageLanguage): string {
 <main id="app"></main>
 <div id="status" class="status" hidden></div>
 <script type="application/json" id="vc-text">${JSON.stringify(TEXT[language])}</script>
+<script>${sandboxShim}</script>
 <script type="module">${inlineModule(bundle.js)}</script>
 <script type="module">
 const text = JSON.parse(document.getElementById('vc-text').textContent);
