@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -76,7 +77,14 @@ async function loadEngine(): Promise<DocxEngine> {
 	const xmldom = require('@xmldom/xmldom');
 	editor.installDomParser(xmldom.DOMParser, xmldom.XMLSerializer);
 	// Un solo renderer para todo el proceso: carga motor y metricas una vez.
-	const renderer = pdf.createRenderer({ metricsDir: join(dir, 'viewer', 'assets') });
+	// Google Fonts bajo demanda: las familias que el documento pide y no hay en local se bajan una
+	// vez y quedan en caché (en el volumen de n8n, para que sobrevivan al reinicio). Sin red no pasa nada.
+	const renderer = pdf.createRenderer({
+		metricsDir: join(dir, 'viewer', 'assets'),
+		googleFonts: true,
+		googleFontsDir:
+			process.env.VELVER_GOOGLE_FONTS_DIR || join(homedir(), '.n8n', 'docx-pdf-google-fonts'),
+	});
 
 	// El motor solo reconoce chips (content controls). Una plantilla con texto plano
 	// {{variable}} se convierte a chips en cuerpo, encabezados, pies y notas.
